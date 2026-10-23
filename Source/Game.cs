@@ -41,6 +41,7 @@ namespace Atlas2D
         private readonly Predicate<IGameClass> _isQueuedForRemoval;
         private bool _useClassesQueue = false;
         private BlendMode _currentBlendMode = BlendMode.Interpolative;
+        private bool _isGraphicsInitialized = false;
         private bool _hasExited = false;
 
         protected Game()
@@ -112,9 +113,13 @@ namespace Atlas2D
             LinearBackgroundColor = new Vector4(MathF.Pow(backgroundColor.R, 2.2f), MathF.Pow(backgroundColor.G, 2.2f), MathF.Pow(backgroundColor.B, 2.2f), backgroundColor.A);
         }
 
+        public BlendMode BlendingMode => _currentBlendMode;
+
         public void SetBlendingMode(BlendMode blendMode)
         {
+            if (_currentBlendMode == blendMode) return;
             _currentBlendMode = blendMode;
+            if (_isGraphicsInitialized) ApplyBlendingMode();
         }
 
         private void ApplyBlendingMode()
@@ -166,6 +171,7 @@ namespace Atlas2D
             glEnable(GL_STENCIL_TEST);
             glEnable(GL_FRAMEBUFFER_SRGB);
             ApplyBlendingMode();
+            _isGraphicsInitialized = true;
             // -----------
 
             GlobalShaders.Initialize();

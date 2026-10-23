@@ -644,9 +644,10 @@ namespace Atlas2D
         public void Render()
         {
             if (!Enabled) return;
+            BlendMode previous = Engine.Game.BlendingMode;
             Engine.Game.SetBlendingMode(BlendMode);
             Renderer.Render();
-            Engine.Game.SetBlendingMode(BlendMode.Interpolative);
+            Engine.Game.SetBlendingMode(previous);
         }
     }
 
