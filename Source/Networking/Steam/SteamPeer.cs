@@ -36,17 +36,15 @@ namespace Riptide.Transports.Steam
                 {
                     SteamNetworkingMessage_t data = Marshal.PtrToStructure<SteamNetworkingMessage_t>(ptrs[i]);
 
-                    if (data.m_cbSize > 0)
+                    if (data.m_cbSize > receiveBuffer.Length)
                     {
-                        int byteCount = data.m_cbSize;
-                        if (data.m_cbSize > receiveBuffer.Length)
-                        {
-                            Debug.LogWarning($"{LogName}: Can't fully handle {data.m_cbSize} bytes because it exceeds the maximum of {receiveBuffer.Length}. Data will be incomplete!");
-                            byteCount = receiveBuffer.Length;
-                        }
-
+                        // No real message is this big, and a cut-off one would be read as garbage, so drop it
+                        Debug.LogWarning($"{LogName}: Dropped a {data.m_cbSize} byte message because it's bigger than the maximum of {receiveBuffer.Length}.");
+                    }
+                    else if (data.m_cbSize > 0)
+                    {
                         Marshal.Copy(data.m_pData, receiveBuffer, 0, data.m_cbSize);
-                        OnDataReceived(receiveBuffer, byteCount, fromConnection);
+                        OnDataReceived(receiveBuffer, data.m_cbSize, fromConnection);
                     }
 
                     SteamNetworkingMessage_t.Release(ptrs[i]);

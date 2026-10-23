@@ -151,8 +151,10 @@ namespace Atlas2D.Networking
         private void InterpolateRotation()
         {
             float rt = (Time.GameTime - _rotationTimeReceived) / SafeInterval(RotationNetworkSettings.SendInterval);
+            // Turns the short way, so 350 to 10 goes through 0 instead of 180
+            float delta = ((_interpolateToRotation - _interpolateFromRotation) % 360f + 540f) % 360f - 180f;
             LocalRotation = rt <= 1
-                ? (_interpolateFromRotation * (1f - rt)) + (_interpolateToRotation * rt)
+                ? _interpolateFromRotation + delta * rt
                 : _interpolateToRotation;
         }
 

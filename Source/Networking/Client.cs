@@ -27,6 +27,8 @@ namespace Atlas2D.Networking.Core
         private Queue<(NetworkNode, string, ushort)> _syncingNetworkNodes = new();
         private Server _server;
         private Queue<(BuiltInMessageType, object)> _messageQueue = new();
+        // Messages that arrive while syncing wait here, in order, until syncing is done
+        private Queue<(BuiltInMessageType, object)> _heldMessages = new();
         private bool _isSyncing = false;
         private bool _isPaused = false;
         private int _syncCount = 0;
@@ -64,14 +66,17 @@ namespace Atlas2D.Networking.Core
             RiptideClient?.Update();
             if (!_isPaused)
             {
-                while(_messageQueue.Count > 0)
+                while (true)
                 {
                     (BuiltInMessageType, object) data;
-                    if (!_messageQueue.TryDequeue(out data)) break;
-                    if(_isSyncing && data.Item1 != BuiltInMessageType.NetworkNodeSync)
+                    // Held messages arrived first, so they're handled first once syncing ends
+                    if (!_isSyncing && _heldMessages.Count > 0) data = _heldMessages.Dequeue();
+                    else if (!_messageQueue.TryDequeue(out data)) break;
+
+                    if (_isSyncing && data.Item1 != BuiltInMessageType.NetworkNodeSync)
                     {
-                        _messageQueue.Enqueue(data);
-                        break;
+                        _heldMessages.Enqueue(data);
+                        continue;
                     }
 
                     try
@@ -146,6 +151,7 @@ namespace Atlas2D.Networking.Core
         {
             RiptideClient.Disconnect();
             _messageQueue.Clear();
+            _heldMessages.Clear();
             if(_networkMode == TransportMode.SteamP2P)
                 SteamClient.SetLastUsedPassword("");
         }
@@ -378,10 +384,11 @@ namespace Atlas2D.Networking.Core
             {
                 AddSyncedNode(data);
             }
-            finally
+            catch (Exception e)
             {
-                _syncCount--;
+                Debug.LogError($"(CLIENT): Could not add synced NetworkNode [{data.NetworkID}]. {e}");
             }
+            _syncCount--;
 
             Debug.Log($"(CLIENT): Received sync data from server, {_syncCount} left.");
             if (_syncCount <= 0)
@@ -466,6 +473,7 @@ namespace Atlas2D.Networking.Core
             NetworkNodes.Clear();
             _syncingNetworkNodes.Clear();
             _messageQueue.Clear();
+            _heldMessages.Clear();
             _isPaused = false;
             _isSyncing = false;
             _syncCount = 0;
