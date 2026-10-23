@@ -40,26 +40,36 @@ namespace Atlas2D.Networking
 
         private Dictionary<string, DependencyCallback> _dependencies = new();
         private int _totalDependencies = 0;
-        private bool _markDispose = false;
+        private int _markDispose = 0;
 
-        protected NetworkNode()
-        {
-            // Deferred dispose hook for cross-thread safety.
-            Engine.Game.LateUpdateEvent += () =>
-            {
-                if (_markDispose)
-                    Dispose();
-            };
-        }
+        protected NetworkNode() { }
 
         /// <summary>
-        /// Cleans up network state when the node is disposed.
-        /// Subclasses should call base.OnDispose() to ensure network teardown runs.
+        /// Cleans up network state when the node is disposed. If this client owns the node, it's despawned
+        /// for everyone. Subclasses should call base.OnDispose() to ensure network teardown runs.
         /// </summary>
         protected override void OnDispose()
         {
+            if (_markDispose == 1) Engine.Game.LateUpdateEvent -= DisposeIfMarked;
+
             if (IsNetworkInitialized)
-                Despawn(sendMessageToServer: false);
+            {
+                Core.Client client = _client;
+                string networkID = NetworkID;
+                bool isOwner = IsOwner;
+                Despawn(sendMessageToServer: true);
+                // Owned nodes are removed when the server confirms the despawn
+                if (!isOwner) client?.NetworkNodes.Remove(networkID);
+            }
+            else if (IsOwner && _client != null && !string.IsNullOrEmpty(NetworkID))
+            {
+                // The spawn was sent but not confirmed yet
+                Message message = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeDespawned);
+                message.AddString(NetworkID);
+                _client.Send(message);
+                _client.NetworkNodes.Remove(NetworkID);
+                Reset();
+            }
         }
 
         /// <summary>
@@ -67,7 +77,18 @@ namespace Atlas2D.Networking
         /// </summary>
         public void MarkDispose()
         {
-            _markDispose = true;
+            // Only subscribes when needed, so idle nodes don't each add a LateUpdate handler
+            if (Interlocked.Exchange(ref _markDispose, 1) == 0)
+            {
+                Engine.Game.LateUpdateEvent += DisposeIfMarked;
+            }
+        }
+
+        private void DisposeIfMarked()
+        {
+            Engine.Game.LateUpdateEvent -= DisposeIfMarked;
+            _markDispose = 2;
+            Dispose();
         }
 
         internal static void AssignRegisterID(Type type, int id)

@@ -108,6 +108,11 @@ namespace Atlas2D.Networking.Core
 
         public void Send(Message message, bool shouldRelease = true)
         {
+            if (!IsConnected)
+            {
+                if (shouldRelease) message.Release();
+                return;
+            }
             RiptideClient.Send(message, shouldRelease);
         }
 
@@ -121,6 +126,8 @@ namespace Atlas2D.Networking.Core
 
             Message message = Message.Create();
             message.AddString(password);
+            // Lets the server know this client is the host when connecting to our own server
+            message.AddString(_server != null && _server.IsRunning ? _server.HostKey : "");
             if(_networkMode == TransportMode.NetworkP2P)
             {
                 return RiptideClient.Connect($"{(address == "localhost" ? "127.0.0.1" : address)}:{port}", message: message, useMessageHandlers: false);
@@ -324,7 +331,10 @@ namespace Atlas2D.Networking.Core
             {
                 if (!NetworkNodes.ContainsKey(data.NetworkID))
                 {
-                    Debug.LogError($"(CLIENT): Could not initialize locally spawned NetworkNode with id [{data.NetworkID}].");
+                    // The node was disposed before the server confirmed its spawn, so remove it on the server too
+                    Message despawnMessage = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeDespawned);
+                    despawnMessage.AddString(data.NetworkID);
+                    Send(despawnMessage);
                     return;
                 }
                 NetworkNodes[data.NetworkID].SetUpdateVersion(data.Version);

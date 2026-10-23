@@ -30,17 +30,17 @@ namespace Atlas2D.Networking
         public Vector2 Scale
         {
             get => LocalScale;
-            set { if (IsOwner) LocalScale = value; }
+            set { if (IsOwner || !IsNetworkInitialized) LocalScale = value; }
         }
         public Vector2 Position
         {
             get => LocalPosition;
-            set { if (IsOwner) LocalPosition = value; }
+            set { if (IsOwner || !IsNetworkInitialized) LocalPosition = value; }
         }
         public float Rotation
         {
             get => LocalRotation;
-            set { if (IsOwner) LocalRotation = value; }
+            set { if (IsOwner || !IsNetworkInitialized) LocalRotation = value; }
         }
 
         public NetworkValueSettings PositionNetworkSettings { get; set; }
@@ -66,12 +66,19 @@ namespace Atlas2D.Networking
         private Vector2 _lastSentScale;
         private Vector2 _lastSentPosition;
         private float _lastRotation;
+        private float _timeSincePositionSent;
+        private float _timeSinceRotationSent;
+        private float _timeSinceScaleSent;
+
+        // Unchanged values are still sent this often, in case an unreliable update was lost
+        private const float RESEND_INTERVAL = 1f;
 
         public NetworkTransformNode()
         {
-            PositionNetworkSettings = new NetworkValueSettings() { SendAutomatically = true, MessageSendMode = MessageSendMode.Unreliable };
-            RotationNetworkSettings = new NetworkValueSettings() { SendAutomatically = true, MessageSendMode = MessageSendMode.Unreliable };
-            ScaleNetworkSettings = new NetworkValueSettings() { SendAutomatically = true, MessageSendMode = MessageSendMode.Unreliable };
+            // 20 updates per second, smoothed on other clients
+            PositionNetworkSettings = new NetworkValueSettings(true, 0.05f, MessageSendMode.Unreliable, true);
+            RotationNetworkSettings = new NetworkValueSettings(true, 0.05f, MessageSendMode.Unreliable, true);
+            ScaleNetworkSettings = new NetworkValueSettings(true, 0.05f, MessageSendMode.Unreliable, true);
         }
 
         public NetworkTransformNode(NetworkValueSettings positionNetworkSettings,
@@ -86,28 +93,32 @@ namespace Atlas2D.Networking
         {
             if (IsOwner && IsNetworkInitialized)
             {
+                // Values are only sent when they've changed, or every RESEND_INTERVAL seconds
                 if (_currentPositionSendIntervalTime >= PositionNetworkSettings.SendInterval)
                 {
-                    if (PositionNetworkSettings.SendAutomatically)
+                    if (PositionNetworkSettings.SendAutomatically && (Position != _lastSentPosition || _timeSincePositionSent >= RESEND_INTERVAL))
                         SendPositionUpdate(PositionNetworkSettings.MessageSendMode);
-                    _currentPositionSendIntervalTime -= PositionNetworkSettings.SendInterval;
+                    _currentPositionSendIntervalTime = MathF.Max(_currentPositionSendIntervalTime - PositionNetworkSettings.SendInterval, 0);
                 }
                 if (_currentRotationSendIntervalTime >= RotationNetworkSettings.SendInterval)
                 {
-                    if (RotationNetworkSettings.SendAutomatically)
+                    if (RotationNetworkSettings.SendAutomatically && (Rotation != _lastRotation || _timeSinceRotationSent >= RESEND_INTERVAL))
                         SendRotationUpdate(RotationNetworkSettings.MessageSendMode);
-                    _currentRotationSendIntervalTime -= RotationNetworkSettings.SendInterval;
+                    _currentRotationSendIntervalTime = MathF.Max(_currentRotationSendIntervalTime - RotationNetworkSettings.SendInterval, 0);
                 }
                 if (_currentScaleSendIntervalTime >= ScaleNetworkSettings.SendInterval)
                 {
-                    if (ScaleNetworkSettings.SendAutomatically)
+                    if (ScaleNetworkSettings.SendAutomatically && (Scale != _lastSentScale || _timeSinceScaleSent >= RESEND_INTERVAL))
                         SendScaleUpdate(ScaleNetworkSettings.MessageSendMode);
-                    _currentScaleSendIntervalTime -= ScaleNetworkSettings.SendInterval;
+                    _currentScaleSendIntervalTime = MathF.Max(_currentScaleSendIntervalTime - ScaleNetworkSettings.SendInterval, 0);
                 }
 
                 _currentPositionSendIntervalTime += Time.DeltaTime;
                 _currentRotationSendIntervalTime += Time.DeltaTime;
                 _currentScaleSendIntervalTime += Time.DeltaTime;
+                _timeSincePositionSent += Time.DeltaTime;
+                _timeSinceRotationSent += Time.DeltaTime;
+                _timeSinceScaleSent += Time.DeltaTime;
             }
             else if (!IsOwner && IsNetworkInitialized)
             {
@@ -120,23 +131,33 @@ namespace Atlas2D.Networking
             }
         }
 
+        private static float SafeInterval(float interval) => MathF.Max(interval, 0.001f);
+
         private void InterpolatePosition()
         {
-            while (_interpolatePositionTime >= PositionNetworkSettings.SendInterval && _interpolateToPositionQueue.Count > 0)
+            float interval = SafeInterval(PositionNetworkSettings.SendInterval);
+            while (_interpolatePositionTime >= interval && _interpolateToPositionQueue.Count > 0)
             {
                 _interpolateFromPosition = _interpolateToPosition;
                 _interpolateToPosition = _interpolateToPositionQueue.Dequeue();
-                _interpolatePositionTime -= PositionNetworkSettings.SendInterval;
+                _interpolatePositionTime -= interval;
             }
 
-            float pt = _interpolatePositionTime / PositionNetworkSettings.SendInterval;
+            // Waiting for the next update. Without this the time keeps growing while the owner stands
+            // still, and every update after that snaps instead of being smoothed.
+            if (_interpolateToPositionQueue.Count == 0 && _interpolatePositionTime > interval)
+            {
+                _interpolatePositionTime = interval;
+            }
+
+            float pt = _interpolatePositionTime / interval;
             LocalPosition = Vector2.Lerp(_interpolateFromPosition, _interpolateToPosition, MathF.Min(pt, 1));
             _interpolatePositionTime += Time.DeltaTime * (1 + _interpolateToPositionQueue.Count * 0.005f);
         }
 
         private void InterpolateRotation()
         {
-            float rt = (Time.GameTime - _rotationTimeReceived) / RotationNetworkSettings.SendInterval;
+            float rt = (Time.GameTime - _rotationTimeReceived) / SafeInterval(RotationNetworkSettings.SendInterval);
             LocalRotation = rt <= 1
                 ? (_interpolateFromRotation * (1f - rt)) + (_interpolateToRotation * rt)
                 : _interpolateToRotation;
@@ -144,7 +165,7 @@ namespace Atlas2D.Networking
 
         private void InterpolateScale()
         {
-            float st = (Time.GameTime - _scaleTimeReceived) / ScaleNetworkSettings.SendInterval;
+            float st = (Time.GameTime - _scaleTimeReceived) / SafeInterval(ScaleNetworkSettings.SendInterval);
             LocalScale = st <= 1
                 ? Vector2.Lerp(_interpolateFromScale, _interpolateToScale, st)
                 : _interpolateToScale;
@@ -156,6 +177,7 @@ namespace Atlas2D.Networking
         public void SendPositionUpdate(MessageSendMode messageSendMode)
         {
             _lastSentPosition = Position;
+            _timeSincePositionSent = 0;
             Send(messageSendMode, JsonConvert.SerializeObject(Position), 1);
         }
 
@@ -165,6 +187,7 @@ namespace Atlas2D.Networking
         public void SendRotationUpdate(MessageSendMode messageSendMode)
         {
             _lastRotation = Rotation;
+            _timeSinceRotationSent = 0;
             Send(messageSendMode, JsonConvert.SerializeObject(Rotation), 2);
         }
 
@@ -174,6 +197,7 @@ namespace Atlas2D.Networking
         public void SendScaleUpdate(MessageSendMode messageSendMode)
         {
             _lastSentScale = Scale;
+            _timeSinceScaleSent = 0;
             Send(messageSendMode, JsonConvert.SerializeObject(Scale), 3);
         }
 
@@ -238,9 +262,9 @@ namespace Atlas2D.Networking
         {
             return JsonConvert.SerializeObject(new NetworkTransformInitializationJson
             {
-                Position = _lastSentPosition,
-                Rotation = _lastRotation,
-                Scale = _lastSentScale,
+                Position = LocalPosition,
+                Rotation = LocalRotation,
+                Scale = LocalScale,
                 PositionNetworkSettings = PositionNetworkSettings,
                 RotationNetworkSettings = RotationNetworkSettings,
                 ScaleNetworkSettings = ScaleNetworkSettings

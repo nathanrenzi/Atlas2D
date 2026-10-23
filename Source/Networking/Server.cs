@@ -15,6 +15,10 @@ namespace Atlas2D.Networking.Core
         public bool IsRunning => RiptideServer.IsRunning;
         public bool AllowNonHostOwnership { get; set; } = true;
         /// <summary>
+        /// A random key the host's own client sends when connecting, so the server knows which client is the host.
+        /// </summary>
+        internal string HostKey { get; private set; } = "";
+        /// <summary>
         /// How many NetworkNodes each client can spawn per second. Spawns over this are rejected.
         /// </summary>
         public int MaxSpawnsPerSecond { get; set; } = 60;
@@ -33,7 +37,7 @@ namespace Atlas2D.Networking.Core
         private List<(string, ushort)> _networkNodesToAdd = new();
         private bool _queueNetworkNodes = false;
         private bool _hostAssigned = false;
-        private ushort _hostID = 1;
+        private ushort _hostID = 0;
         private string _serverPassword = null;
         private TransportMode _networkMode;
 
@@ -153,6 +157,7 @@ namespace Atlas2D.Networking.Core
         {
             if (IsRunning) return;
             _serverPassword = password;
+            HostKey = Guid.NewGuid().ToString("N");
             if(_networkMode == TransportMode.NetworkP2P)
             {
                 RiptideServer.Start(port, maxClientCount, useMessageHandlers: false);
@@ -177,7 +182,8 @@ namespace Atlas2D.Networking.Core
             _networkGameClassOwners.Clear();
             _serverPassword = "";
             _hostAssigned = false;
-            _hostID = 1;
+            _hostID = 0;
+            HostKey = "";
         }
 
         #region Handlers
@@ -544,6 +550,27 @@ namespace Atlas2D.Networking.Core
         private void ValidateConnection(Connection pendingConnection, Message connectMessage)
         {
             string password = connectMessage.GetString();
+            string hostKey = connectMessage.UnreadBits > 0 ? connectMessage.GetString() : "";
+
+            // The host's own client skips the password and validators
+            if (!_hostAssigned && HostKey != "" && hostKey == HostKey)
+            {
+                RiptideServer.Accept(pendingConnection);
+                if (pendingConnection.Id != 0)
+                {
+                    _hostID = pendingConnection.Id;
+                    _hostAssigned = true;
+                }
+                return;
+            }
+
+            // Nobody else can join until the host has
+            if (!_hostAssigned)
+            {
+                RiptideServer.Reject(pendingConnection, Message.Create().AddString("The host hasn't joined yet."));
+                return;
+            }
+
             if (_serverPassword != "" && !_serverPassword.Equals(password))
             {
                 RiptideServer.Reject(pendingConnection, Message.Create().AddString("Incorrect password."));
