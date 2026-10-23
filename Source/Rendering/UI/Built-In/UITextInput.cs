@@ -237,21 +237,30 @@ namespace Atlas2D.UI
 
             Input.AddListener(this);
 
-            Engine.Game.LateUpdateEvent += () =>
+            Engine.Game.LateUpdateEvent += RepeatHeldKey;
+        }
+
+        private void RepeatHeldKey()
+        {
+            if (_holdingKey != KeyCode.Unknown)
             {
-                if (_holdingKey != KeyCode.Unknown)
+                if (Time.GameTime - _startHoldingTime >= REPEAT_DELAY)
                 {
-                    if (Time.GameTime - _startHoldingTime >= REPEAT_DELAY)
+                    _currentHoldingTime += Time.DeltaTime;
+                    if (_currentHoldingTime >= REPEAT_RATE)
                     {
-                        _currentHoldingTime += Time.DeltaTime;
-                        if (_currentHoldingTime >= REPEAT_RATE)
-                        {
-                            _currentHoldingTime -= REPEAT_RATE;
-                            DoSpecialKey(_holdingKey);
-                        }
+                        _currentHoldingTime -= REPEAT_RATE;
+                        DoSpecialKey(_holdingKey);
                     }
                 }
-            };
+            }
+        }
+
+        protected override void OnDispose()
+        {
+            Engine.Game.LateUpdateEvent -= RepeatHeldKey;
+            Input.RemoveListener(this);
+            Input.UnlockKeyInput(this, 1);
         }
 
         private void UpdateCaret()

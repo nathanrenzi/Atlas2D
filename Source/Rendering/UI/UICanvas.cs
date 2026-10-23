@@ -125,6 +125,10 @@ namespace Atlas2D.UI
         {
             _allElements.Remove(element);
             _rootElements.Remove(element);
+
+            if (_hoveredElement == element) _hoveredElement = null;
+            if (_focusedElement == element) _focusedElement = null;
+            if (_draggedElement == element) _draggedElement = null;
         }
 
         /// <summary>

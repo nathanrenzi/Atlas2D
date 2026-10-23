@@ -29,7 +29,7 @@ namespace Atlas2D
         private static JoystickCallback _joystickCallback;
         private static List<IKeyListener> _keyListeners = new List<IKeyListener>();
         private static bool _lockKeyInput = false;
-        private static Dictionary<uint, Dictionary<object, bool>> _lockPriorityDictionary = new();
+        private static HashSet<(object, uint)> _keyLocks = new();
         private static List<int> _connectedGamepads = new List<int>();
         private static Dictionary<KeyCode, int> _keyIndexCache = new();
 
@@ -45,73 +45,24 @@ namespace Atlas2D
         }
 
         /// <summary>
-        /// Locks the key input.
-        /// Only <see cref="IKeyListener"/> instances will receive key inputs.
+        /// Locks the key input until the same caller unlocks it. While any caller holds a lock,
+        /// only <see cref="IKeyListener"/> instances will receive key inputs.
         /// </summary>
         public static bool LockKeyInput(object callerObj, uint priority = 0)
         {
-            if(!_lockPriorityDictionary.ContainsKey(priority))
-            {
-                _lockPriorityDictionary.Add(priority, new Dictionary<object, bool>());
-            }
-            if (!_lockPriorityDictionary[priority].ContainsKey(callerObj))
-            {
-                _lockPriorityDictionary[priority].Add(callerObj, true);
-            }
-            else
-            {
-                _lockPriorityDictionary[priority][callerObj] = true;
-            }
-            return RecalculateLock();
+            if (callerObj != null) _keyLocks.Add((callerObj, priority));
+            _lockKeyInput = _keyLocks.Count > 0;
+            return _lockKeyInput;
         }
 
         /// <summary>
-        /// Unlocks the key input.
+        /// Removes a lock added with <see cref="LockKeyInput"/>.
         /// </summary>
         public static bool UnlockKeyInput(object callerObj, uint priority = 0)
         {
-            if (!_lockPriorityDictionary.ContainsKey(priority))
-            {
-                _lockPriorityDictionary.Add(priority, new Dictionary<object, bool>());
-            }
-            if (!_lockPriorityDictionary[priority].ContainsKey(callerObj))
-            {
-                _lockPriorityDictionary[priority].Add(callerObj, false);
-            }
-            else
-            {
-                _lockPriorityDictionary[priority][callerObj] = false;
-            }
-            return RecalculateLock();
-        }
-
-        private static bool RecalculateLock()
-        {
-            uint lastMaxPriority = 0;
-            uint maxPriority = 0;
-            bool shouldLock = false;
-            foreach (var pair in _lockPriorityDictionary)
-            {
-                if(pair.Key >= maxPriority)
-                {
-                    bool foundEntryInThisPriority = false;
-                    lastMaxPriority = maxPriority;
-                    maxPriority = pair.Key;
-                    foreach (var value in pair.Value)
-                    {
-                        if (value.Key == null) continue;
-                        foundEntryInThisPriority = true;
-                        shouldLock = value.Value;
-                    }
-                    if(!foundEntryInThisPriority)
-                    {
-                        maxPriority = lastMaxPriority;
-                        pair.Value.Clear();
-                    }
-                }
-            }
-            _lockKeyInput = shouldLock;
-            return shouldLock;
+            if (callerObj != null) _keyLocks.Remove((callerObj, priority));
+            _lockKeyInput = _keyLocks.Count > 0;
+            return _lockKeyInput;
         }
 
         public static void Initialize()

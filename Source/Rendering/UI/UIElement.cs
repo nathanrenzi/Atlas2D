@@ -337,6 +337,7 @@ namespace Atlas2D.UI
         public bool Mask { get; }
 
         private bool _useMeshRenderer;
+        private bool _disposed;
         private CursorType _hoverCursorType = CursorType.Arrow;
         private List<IConstraint> _constraints = new List<IConstraint>();
         private Dictionary<UIEventType, List<Action<UIEvent>>> _eventHandlers = new Dictionary<UIEventType, List<Action<UIEvent>>>();
@@ -991,6 +992,16 @@ namespace Atlas2D.UI
 
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+
+            if (Parent != null)
+            {
+                Parent._children.Remove(this);
+                Parent.InvalidateMeasure();
+                Parent = null;
+            }
+
             RenderLayerManager.RemoveRenderable(this);
 
             foreach (var child in _children.ToArray())

@@ -62,6 +62,18 @@
             }
         }
 
+        private static void RenderOne(IRenderable renderable)
+        {
+            try
+            {
+                renderable.Render();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error rendering {renderable.GetType().Name}: {ex}");
+            }
+        }
+
         /// <summary>
         /// Called by the game loop to render all current render layers.
         /// </summary>
@@ -75,14 +87,13 @@
 
                     for (int i = 0; i < pair.Value.Count; i++)
                     {
-                        pair.Value[i].Render();
+                        RenderOne(pair.Value[i]);
                     }
                 }
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                Debug.LogError("Tried to create / destroy an IRenderable during the render loop. This is not allowed. See below.");
-                Debug.LogError(ex.Message);
+                Debug.LogError($"Tried to create / destroy an IRenderable during the render loop. This is not allowed. {ex}");
             }
         }
 
@@ -99,14 +110,13 @@
 
                     for (int i = 0; i < pair.Value.Count; i++)
                     {
-                        pair.Value[i].Render();
+                        RenderOne(pair.Value[i]);
                     }
                 }
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
             {
-                Debug.LogError("Tried to create / destroy an IRenderable during the render loop. This is not allowed. See below.");
-                Debug.LogError(ex.Message);
+                Debug.LogError($"Tried to create / destroy an IRenderable during the render loop. This is not allowed. {ex}");
             }
         }
     }
