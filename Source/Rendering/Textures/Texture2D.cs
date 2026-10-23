@@ -9,6 +9,7 @@ namespace Atlas2D.Rendering
     public class Texture2D : ITexture, IDisposable
     {
         private bool _disposed;
+        private bool? _linearFiltering;
         public uint Handle { get; private set; }
         public int Width { get; set; }
         public int Height { get; set; }
@@ -77,6 +78,8 @@ namespace Atlas2D.Rendering
 
         public void SetFilteringMode(bool linear)
         {
+            if (_linearFiltering == linear) return;
+            _linearFiltering = linear;
             Use(GL_TEXTURE0);
 
             if (linear)

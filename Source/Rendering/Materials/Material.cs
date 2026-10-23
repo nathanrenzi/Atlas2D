@@ -33,9 +33,6 @@ namespace Atlas2D.Rendering
                 shader.Value.SetInt("mainTextureSampler", 0);
                 shader.Value.SetInt("normalTextureSampler", 1);
             }
-
-            MainTexture.Value.SetFilteringMode(UsingLinearFiltering);
-            NormalTexture.Value.SetFilteringMode(UsingLinearFiltering);
         }
 
         public void SetShader(SharedResource<Shader> shader)
@@ -138,6 +135,8 @@ namespace Atlas2D.Rendering
 
         public void Use()
         {
+            MainTexture.Value.SetFilteringMode(UsingLinearFiltering);
+            NormalTexture.Value.SetFilteringMode(UsingLinearFiltering);
             MainTexture.Value.Use(GL_TEXTURE0);
             NormalTexture.Value.Use(GL_TEXTURE1);
 
