@@ -43,6 +43,8 @@ namespace Atlas2D.UI
 
         private List<UIElement> _rootElements = new List<UIElement>();
         private List<UIElement> _allElements = new List<UIElement>();
+        private List<UIElement> _arrangeQueue = new List<UIElement>();
+        private List<UIElement> _arrangeQueueBuffer = new List<UIElement>();
         private UIElement _focusedElement = null;
         private UIElement _hoveredElement = null;
         private UIElement _draggedElement = null;
@@ -292,6 +294,18 @@ namespace Atlas2D.UI
                     root.Arrange(new Rect(0, 0, root.DesiredSize.X, root.DesiredSize.Y));
                 }
             }
+
+            (_arrangeQueue, _arrangeQueueBuffer) = (_arrangeQueueBuffer, _arrangeQueue);
+            foreach (var element in _arrangeQueueBuffer)
+            {
+                element.ArrangeFromLastRect();
+            }
+            _arrangeQueueBuffer.Clear();
+        }
+
+        internal void QueueArrange(UIElement element)
+        {
+            _arrangeQueue.Add(element);
         }
 
         private void Update()

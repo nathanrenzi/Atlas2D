@@ -37,7 +37,7 @@ namespace Atlas2D.UI
                 if (_position != value)
                 {
                     _position = value;
-                    InvalidateArrange();
+                    Parent?.InvalidateArrange();
                 }
             }
         }
@@ -76,7 +76,7 @@ namespace Atlas2D.UI
         /// <summary>
         /// Gets or sets the pivot point for this element, expressed as a normalized value (0-1).
         /// The pivot determines the origin point for positioning and transformations.
-        /// Setting this property invalidates arrangement and updates the mesh.
+        /// Setting this property updates the mesh.
         /// </summary>
         public Vector2 Pivot
         {
@@ -86,7 +86,6 @@ namespace Atlas2D.UI
                 if(_pivot != value)
                 {
                     _pivot = value;
-                    InvalidateArrange();
                     UpdateMesh();
                 }
             }
@@ -106,7 +105,7 @@ namespace Atlas2D.UI
                 if (_anchor != value)
                 {
                     _anchor = value;
-                    InvalidateArrange();
+                    Parent?.InvalidateArrange();
                 }
             }
         }
@@ -283,7 +282,19 @@ namespace Atlas2D.UI
         /// <summary>
         /// Gets or sets the layout strategy used to position and size child elements.
         /// </summary>
-        public UILayout Layout { get; set; }
+        public UILayout Layout
+        {
+            get => _layout;
+            set
+            {
+                if (_layout == value) return;
+                _layout?.UnregisterElement(this);
+                _layout = value;
+                _layout?.RegisterElement(this);
+                InvalidateMeasure();
+            }
+        }
+        private UILayout _layout;
 
         /// <summary>
         /// Gets the mesh renderer used to draw this element (if it exists).
@@ -338,6 +349,7 @@ namespace Atlas2D.UI
 
         private bool _useMeshRenderer;
         private bool _disposed;
+        private Rect? _lastArrangeRect;
         private CursorType _hoverCursorType = CursorType.Arrow;
         private List<IConstraint> _constraints = new List<IConstraint>();
         private Dictionary<UIEventType, List<Action<UIEvent>>> _eventHandlers = new Dictionary<UIEventType, List<Action<UIEvent>>>();
@@ -451,6 +463,13 @@ namespace Atlas2D.UI
         {
             if (!IsArrangeValid) return;
             IsArrangeValid = false;
+            UICanvas.Instance?.QueueArrange(this);
+        }
+
+        internal void ArrangeFromLastRect()
+        {
+            if (_disposed || IsArrangeValid || !_lastArrangeRect.HasValue) return;
+            Arrange(_lastArrangeRect.Value);
         }
 
         /// <summary>
@@ -539,6 +558,8 @@ namespace Atlas2D.UI
         /// <param name="finalRect">The final rectangle allocated to this element by its parent.</param>
         public void Arrange(Rect finalRect)
         {
+            _lastArrangeRect = finalRect;
+
             if (!Visible)
             {
                 IsArrangeValid = true;
@@ -986,7 +1007,7 @@ namespace Atlas2D.UI
             else if (posChanged)
             {
                 _position = position;
-                InvalidateArrange();
+                Parent?.InvalidateArrange();
             }
         }
 
@@ -1010,6 +1031,7 @@ namespace Atlas2D.UI
             }
 
             _constraints.Clear();
+            _layout?.UnregisterElement(this);
             OnDispose();
             Renderer?.Dispose();
             UICanvas.Instance?.UnregisterUIElement(this);
