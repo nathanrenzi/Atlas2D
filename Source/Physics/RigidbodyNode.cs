@@ -265,7 +265,12 @@ namespace Atlas2D.PhysicsBox2D
                 Debug.LogError("PHYSICS: Cannot create a joint when one or more rigidbodies are null.");
             }
 
-            uint id = Physics.CreateJoint(_jointDef.GetPhysicsDefinition());
+            uint id;
+            // The joint definition reads the Box2D bodies, so the physics thread can't step during this
+            lock (Physics.WorldLock)
+            {
+                id = Physics.CreateJoint(_jointDef.GetPhysicsDefinition());
+            }
             _jointDef.RigidbodyA.Joints.Add(id, _jointDef.RigidbodyB);
             _jointDef.RigidbodyB.Joints.Add(id, _jointDef.RigidbodyA);
             return id;

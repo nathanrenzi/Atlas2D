@@ -210,41 +210,45 @@ namespace Atlas2D
             if (!_isColliderDirty) return;
             _isColliderDirty = false;
 
-            Body body = null;
-            foreach (var entry in CollisionFixtureUpdates)
+            // Fixtures are created on the Box2D body directly, so the physics thread can't step during this
+            lock (Physics.WorldLock)
             {
-                Vector2 localPosition = entry.Key;
-                bool add = entry.Value;
-
-                if (add)
+                Body body = null;
+                foreach (var entry in CollisionFixtureUpdates)
                 {
-                    Vector2 fixturePosition = (localPosition + (Vector2.One * 0.5f)) * _realTilePixelSize / Physics.WorldScalar;
-                    FixtureDef fdef = new FixtureDef();
-                    PolygonShape shape = new PolygonShape();
-                    shape.SetAsBox(TilePixelSize / Physics.WorldScalar, TilePixelSize / Physics.WorldScalar, fixturePosition, 0);
-                    fdef.shape = shape;
+                    Vector2 localPosition = entry.Key;
+                    bool add = entry.Value;
 
-                    if (CollisionBody == 999999999)
+                    if (add)
                     {
-                        BodyDef bodyDef = new BodyDef() { position = WorldPosition / Physics.WorldScalar };
-                        CollisionBody = Physics.CreatePhysicsBody(bodyDef, fdef, new MassData(), true);
-                    }
+                        Vector2 fixturePosition = (localPosition + (Vector2.One * 0.5f)) * _realTilePixelSize / Physics.WorldScalar;
+                        FixtureDef fdef = new FixtureDef();
+                        PolygonShape shape = new PolygonShape();
+                        shape.SetAsBox(TilePixelSize / Physics.WorldScalar, TilePixelSize / Physics.WorldScalar, fixturePosition, 0);
+                        fdef.shape = shape;
 
-                    body ??= Physics.GetBody(CollisionBody);
-                    CollisionFixtures.Add(localPosition, body.CreateFixture(fdef));
-                }
-                else
-                {
-                    // Destroy the Box2D fixture before removing from tracking
-                    if (CollisionBody != 999999999 && CollisionFixtures.TryGetValue(localPosition, out Fixture fixture))
-                    {
+                        if (CollisionBody == 999999999)
+                        {
+                            BodyDef bodyDef = new BodyDef() { position = WorldPosition / Physics.WorldScalar };
+                            CollisionBody = Physics.CreatePhysicsBody(bodyDef, fdef, new MassData(), true);
+                        }
+
                         body ??= Physics.GetBody(CollisionBody);
-                        body.DestroyFixture(fixture);
+                        CollisionFixtures.Add(localPosition, body.CreateFixture(fdef));
                     }
-                    CollisionFixtures.Remove(localPosition);
+                    else
+                    {
+                        // Destroy the Box2D fixture before removing from tracking
+                        if (CollisionBody != 999999999 && CollisionFixtures.TryGetValue(localPosition, out Fixture fixture))
+                        {
+                            body ??= Physics.GetBody(CollisionBody);
+                            body.DestroyFixture(fixture);
+                        }
+                        CollisionFixtures.Remove(localPosition);
+                    }
                 }
+                CollisionFixtureUpdates.Clear();
             }
-            CollisionFixtureUpdates.Clear();
         }
 
         private Vector2 RotateUV(Vector2 uv, float degrees)

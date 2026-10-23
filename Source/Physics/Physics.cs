@@ -6,14 +6,24 @@ using Box2D.NetStandard.Dynamics.Fixtures;
 using Box2D.NetStandard.Dynamics.Joints;
 using Box2D.NetStandard.Dynamics.World;
 using Box2D.NetStandard.Dynamics.World.Callbacks;
+using System.Collections.Concurrent;
 using System.Numerics;
 
 namespace Atlas2D.PhysicsBox2D
 {
+    /// <summary>
+    /// The physics world. It steps on its own thread, so:
+    /// <list type="bullet">
+    /// <item>Setters (forces, velocity, position, ...) are queued and applied at the start of the next step.</item>
+    /// <item>Getters return the body's state from the end of the last step.</item>
+    /// <item>Creating and removing bodies or joints happens right away (it waits for the current step to finish).</item>
+    /// </list>
+    /// </summary>
     public static class Physics
     {
-        private enum PhysicsCallType
+        private enum CommandType
         {
+            CreateBody,
             RemoveBody,
             ApplyForce,
             ApplyImpulse,
@@ -28,507 +38,489 @@ namespace Atlas2D.PhysicsBox2D
             RemoveJoint,
         }
 
+        private struct PhysicsCommand
+        {
+            public CommandType Type;
+            public uint ID;
+            public Vector2 Vector;
+            public Vector2 Point;
+            public float Value;
+            public bool Flag;
+            public Filter Filter;
+            public BodyDef BodyDef;
+            public FixtureDef FixtureDef;
+            public MassData MassData;
+            public JointDef JointDef;
+        }
+
+        private struct BodyState
+        {
+            public Vector2 Position;
+            public float Rotation;
+            public Vector2 Velocity;
+            public float AngularVelocity;
+        }
+
         // Scaling the physics so that 50 pixels equates to 1 meter in the simulation
         public static readonly float WorldScalar = 50f;
 
-        private static Queue<(BodyDef, FixtureDef, MassData, bool)> creationQueue;
-        private static Queue<(PhysicsCallType, uint, object[])> physicsCallQueue;
-        private static Dictionary<uint, Body> physicsBodies;
-        private static Dictionary<uint, Joint> joints;
-        private static int jointsInQueue = 0;
+        /// <summary>
+        /// Lock this while using Box2D objects directly (<see cref="GetWorld"/>, <see cref="GetBody"/>,
+        /// <see cref="GetJoint"/>), so the physics thread can't step at the same time.
+        /// </summary>
+        public static object WorldLock { get; } = new object();
+
+        private static readonly ConcurrentQueue<PhysicsCommand> _commands = new();
+        private static readonly Dictionary<uint, Body> _bodies = new();
+        private static readonly Dictionary<uint, Joint> _joints = new();
+        private static uint _nextBodyID = 0;
+        private static uint _nextJointID = 0;
         private static World world;
-        private static bool _stepLock = false;
+
+        // Copy of each body's state after the last step, so the main thread can read it without waiting
+        private static readonly object _stateLock = new object();
+        private static readonly Dictionary<uint, BodyState> _bodyStates = new();
 
         /// <summary>
         /// This is called while the game is loading. Initializes the main physics world
         /// (Other physics worlds can be created separately from this using the Box2DX classes).
         /// </summary>
-        /// <param name="_worldLowerBound"></param>
-        /// <param name="_worldUpperBound"></param>
-        /// <param name="_gravity"></param>
-        /// <param name="_doSleep"></param>
         public static void Initialize(Vector2 _gravity, bool _doSleep)
         {
-            creationQueue = new Queue<(BodyDef, FixtureDef, MassData, bool)>();
-            physicsCallQueue = new Queue<(PhysicsCallType, uint, object[])>();
-            physicsBodies = new Dictionary<uint, Body>();
-            joints = new Dictionary<uint, Joint>();
-
-            world = new World(_gravity);
-            world.SetAllowSleeping(_doSleep);
-            world.SetContactFilter(new ContactFilter());
-            world.SetContactListener(new WorldContactListener());
-            world.SetDestructionListener(new WorldDestructionListener());
+            lock (WorldLock)
+            {
+                world = new World(_gravity);
+                world.SetAllowSleeping(_doSleep);
+                world.SetContactFilter(new ContactFilter());
+                world.SetContactListener(new WorldContactListener());
+                world.SetDestructionListener(new WorldDestructionListener());
+            }
         }
 
         /// <summary>
-        /// Gets the physics world.
+        /// Gets the physics world. Lock <see cref="WorldLock"/> while using it.
         /// </summary>
-        /// <returns></returns>
         public static World GetWorld()
         {
             return world;
         }
 
         /// <summary>
-        /// Steps the physics simulation.
+        /// Steps the physics simulation. Called from the physics thread.
         /// </summary>
-        /// <param name="_deltaTime"></param>
-        /// <param name="_velocityIterations"></param>
-        /// <param name="_positionIterations"></param>
         internal static void Step(float _deltaTime, int _velocityIterations, int _positionIterations)
         {
-            _stepLock = true;
-            world.Step(_deltaTime, _velocityIterations, _positionIterations);
-            _stepLock = false;
-
-            // Creating physics bodies that were queued during the step
-            while(creationQueue.Count > 0)
+            lock (WorldLock)
             {
-                (BodyDef, FixtureDef, MassData, bool) data = creationQueue.Dequeue();
-                CreatePhysicsBody(data.Item1, data.Item2, data.Item3, data.Item4, true);
+                ApplyCommands();
+                world.Step(_deltaTime, _velocityIterations, _positionIterations);
+                // Runs anything queued during the step, like bodies created from collision callbacks
+                ApplyCommands();
+                SaveBodyStates();
+            }
+        }
+
+        private static void ApplyCommands()
+        {
+            while (_commands.TryDequeue(out PhysicsCommand command))
+            {
+                ApplyCommand(command);
+            }
+        }
+
+        private static void ApplyCommand(in PhysicsCommand command)
+        {
+            switch (command.Type)
+            {
+                case CommandType.CreateBody:
+                    CreateBodyNow(command.ID, command.BodyDef, command.FixtureDef, command.MassData, command.Flag);
+                    return;
+                case CommandType.RemoveBody:
+                    RemoveBodyNow(command.ID);
+                    return;
+                case CommandType.CreateJoint:
+                    CreateJointNow(command.ID, command.JointDef);
+                    return;
+                case CommandType.RemoveJoint:
+                    RemoveJointNow(command.ID);
+                    return;
             }
 
-            // Calling physics methods that were queued during the step
-            while(physicsCallQueue.Count > 0)
+            // The body may have been removed after the command was queued
+            if (!_bodies.TryGetValue(command.ID, out Body body)) return;
+
+            switch (command.Type)
             {
-                (PhysicsCallType, uint, object[]) data = physicsCallQueue.Dequeue();
-                switch(data.Item1)
+                case CommandType.ApplyForce:
+                    body.ApplyForce(command.Vector, command.Point);
+                    break;
+                case CommandType.ApplyImpulse:
+                    body.ApplyLinearImpulse(command.Vector, command.Point);
+                    break;
+                case CommandType.ApplyTorque:
+                    body.ApplyTorque(command.Value);
+                    break;
+                case CommandType.SetAngle:
+                    body.SetTransform(body.GetPosition(), command.Value * (MathF.PI / 180));
+                    break;
+                case CommandType.SetAngularVelocity:
+                    body.SetAngularVelocity(command.Value);
+                    break;
+                case CommandType.SetVelocity:
+                    body.SetLinearVelocity(command.Vector);
+                    break;
+                case CommandType.SetPosition:
+                    body.SetTransform(command.Vector / WorldScalar, body.GetAngle());
+                    break;
+                case CommandType.SetBodyFixedRotation:
+                    body.SetFixedRotation(command.Flag);
+                    break;
+                case CommandType.SetFilterData:
+                    for (Fixture f = body.GetFixtureList(); f != null; f = f.Next)
+                    {
+                        f.FilterData = command.Filter;
+                        f.Refilter();
+                    }
+                    break;
+            }
+        }
+
+        private static void SaveBodyStates()
+        {
+            lock (_stateLock)
+            {
+                foreach (var pair in _bodies)
                 {
-                    case PhysicsCallType.RemoveBody:
-                        RemovePhysicsBody(data.Item2);
-                        break;
-                    case PhysicsCallType.ApplyForce:
-                        ApplyForce(data.Item2, (Vector2)data.Item3[0], (Vector2)data.Item3[1]);
-                        break;
-                    case PhysicsCallType.ApplyImpulse:
-                        ApplyImpulse(data.Item2, (Vector2)data.Item3[0], (Vector2)data.Item3[1]);
-                        break;
-                    case PhysicsCallType.ApplyTorque:
-                        ApplyTorque(data.Item2, (float)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetAngle:
-                        SetAngle(data.Item2, (float)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetAngularVelocity:
-                        SetAngularVelocity(data.Item2, (float)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetVelocity:
-                        SetVelocity(data.Item2, (Vector2)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetPosition:
-                        SetPosition(data.Item2, (Vector2)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetBodyFixedRotation:
-                        SetBodyFixedRotation(data.Item2, (bool)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.SetFilterData:
-                        SetFilterData(data.Item2, (Filter)data.Item3[0]);
-                        break;
-                    case PhysicsCallType.CreateJoint:
-                        CreateJoint((JointDef)data.Item3[0], true);
-                        jointsInQueue--;
-                        break;
-                    case PhysicsCallType.RemoveJoint:
-                        RemoveJoint(data.Item2);
-                        break;
+                    _bodyStates[pair.Key] = ReadBodyState(pair.Value);
                 }
             }
         }
 
+        private static BodyState ReadBodyState(Body body)
+        {
+            return new BodyState()
+            {
+                Position = body.GetPosition() * WorldScalar,
+                Rotation = 180 / MathF.PI * body.GetAngle(),
+                Velocity = body.GetLinearVelocity(),
+                AngularVelocity = body.GetAngularVelocity()
+            };
+        }
+
+        #region Joints
         /// <summary>
         /// Creates a joint from a joint definition.
         /// </summary>
-        /// <param name="_jointDef"></param>
-        /// <returns></returns>
         public static uint CreateJoint(JointDef _jointDef)
         {
-            return CreateJoint(_jointDef, false);
+            lock (WorldLock)
+            {
+                uint id = _nextJointID++;
+                if (world.IsLocked())
+                {
+                    _commands.Enqueue(new PhysicsCommand() { Type = CommandType.CreateJoint, ID = id, JointDef = _jointDef });
+                }
+                else
+                {
+                    CreateJointNow(id, _jointDef);
+                }
+                return id;
+            }
         }
 
-        private static uint CreateJoint(JointDef _jointDef, bool _ignoreQueueCount)
+        private static void CreateJointNow(uint _id, JointDef _jointDef)
         {
-            uint id = (uint)(joints.Count + (_ignoreQueueCount ? 0 : jointsInQueue));
-            if (_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.CreateJoint, id, new object[] { _jointDef }));
-                jointsInQueue++;
-                return id;
-            }
-            else
-            {
-                Joint joint = world.CreateJoint(_jointDef);
-                joint.UserData = id;
-                joints.Add(id, joint);
-                return id;
-            }
+            Joint joint = world.CreateJoint(_jointDef);
+            joint.UserData = _id;
+            _joints.Add(_id, joint);
         }
 
         /// <summary>
         /// Removes a joint.
         /// </summary>
-        /// <param name="_jointDef"></param>
-        /// <returns></returns>
         public static void RemoveJoint(uint _id)
         {
-            if (_stepLock)
+            lock (WorldLock)
             {
-                physicsCallQueue.Enqueue((PhysicsCallType.RemoveJoint, _id, new object[0]));
-            }
-            else
-            {
-                if(!joints.ContainsKey(_id))
+                if (world.IsLocked())
                 {
-                    Debug.LogError($"PHYSICS: Joint with ID: [ {_id} ] does not exist, cannot remove.");
+                    _commands.Enqueue(new PhysicsCommand() { Type = CommandType.RemoveJoint, ID = _id });
                 }
                 else
                 {
-                    Joint joint = joints[_id];
-                    world.DestroyJoint(joint);
+                    RemoveJointNow(_id);
                 }
             }
         }
 
-        /// <summary>
-        /// Returns the joint with the given ID, or null if it does not exist
-        /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
-        public static Joint GetJoint(uint _id)
+        private static void RemoveJointNow(uint _id)
         {
-            if(joints.ContainsKey(_id))
+            if (!_joints.Remove(_id, out Joint joint))
             {
-                return joints[_id];
+                Debug.LogError($"PHYSICS: Joint with ID: [ {_id} ] does not exist, cannot remove.");
+                return;
             }
-            else
-            {
-                return null;
-            }
+            world.DestroyJoint(joint);
         }
 
         /// <summary>
-        /// Creates a dynamic physics body and returns it's ID.
+        /// Returns the joint with the given ID, or null if it does not exist. Lock <see cref="WorldLock"/> while using it.
+        /// </summary>
+        public static Joint GetJoint(uint _id)
+        {
+            lock (WorldLock)
+            {
+                return _joints.TryGetValue(_id, out Joint joint) ? joint : null;
+            }
+        }
+        #endregion
+
+        #region Bodies
+        /// <summary>
+        /// Creates a physics body and returns its ID.
         /// </summary>
         /// <param name="_bodyDefinition">The definition of the physics body.</param>
         /// <param name="_fixtureDef">The definition of the fixture. This holds the parameters of the physics body.</param>
         /// <param name="_massData">The mass data of the physics body.</param>
-        /// <returns></returns>
         public static uint CreatePhysicsBody(BodyDef _bodyDefinition, FixtureDef _fixtureDef, MassData _massData, bool _isKinematic)
         {
-            return CreatePhysicsBody(_bodyDefinition, _fixtureDef, _massData, _isKinematic, false);
-        }
-
-        private static uint CreatePhysicsBody(BodyDef _bodyDefinition, FixtureDef _fixtureDef, MassData _massData, bool _isKinematic, bool _ignoreQueueCount)
-        {
-            uint id = (uint)(physicsBodies.Count + (_ignoreQueueCount ? 0 : creationQueue.Count));
-            try
+            lock (WorldLock)
             {
-                if (_stepLock)
+                uint id = _nextBodyID++;
+                if (world.IsLocked())
                 {
-                    creationQueue.Enqueue((_bodyDefinition, _fixtureDef, _massData, _isKinematic));
+                    _commands.Enqueue(new PhysicsCommand()
+                    {
+                        Type = CommandType.CreateBody,
+                        ID = id,
+                        BodyDef = _bodyDefinition,
+                        FixtureDef = _fixtureDef,
+                        MassData = _massData,
+                        Flag = _isKinematic
+                    });
                     return id;
                 }
 
+                return CreateBodyNow(id, _bodyDefinition, _fixtureDef, _massData, _isKinematic) ? id : uint.MaxValue;
+            }
+        }
+
+        private static bool CreateBodyNow(uint _id, BodyDef _bodyDefinition, FixtureDef _fixtureDef, MassData _massData, bool _isKinematic)
+        {
+            try
+            {
                 Body b = world.CreateBody(_bodyDefinition);
-                if (b == null)
-                {
-                    Debug.LogError("PHYSICS: Error creating physics body! Physics step likely in progress!");
-                    return 0;
-                }
-                b.SetUserData(id);
+                b.SetUserData(_id);
                 b.CreateFixture(_fixtureDef);
                 b.SetMassData(_massData);
                 b.SetType(_isKinematic ? BodyType.Kinematic : BodyType.Dynamic);
-                physicsBodies.Add(id, b);
+                _bodies.Add(_id, b);
 
-                return id;
+                lock (_stateLock)
+                {
+                    _bodyStates[_id] = ReadBodyState(b);
+                }
+                return true;
             }
             catch (Exception e)
             {
-                Debug.LogError($"PHYSICS: Could not create physics body [{id}]");
+                Debug.LogError($"PHYSICS: Could not create physics body [{_id}]");
                 Debug.LogError(e.Message);
-
-                return uint.MaxValue;
+                return false;
             }
         }
 
         /// <summary>
         /// Removes a physics body from the simulation.
         /// </summary>
-        /// <param name="_id"></param>
         public static void RemovePhysicsBody(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
+            lock (WorldLock)
             {
-                physicsCallQueue.Enqueue((PhysicsCallType.RemoveBody, _id, new object[0]));
-            }
-            else
-            {
-                if(!physicsBodies.ContainsKey(_id))
+                if (world.IsLocked())
                 {
-                    Debug.LogError($"PHYSICS: Body with ID: [ {_id} ] does not exist, cannot remove.");
+                    _commands.Enqueue(new PhysicsCommand() { Type = CommandType.RemoveBody, ID = _id });
                 }
-                world.DestroyBody(physicsBodies[_id]);
+                else
+                {
+                    RemoveBodyNow(_id);
+                }
             }
         }
 
+        private static void RemoveBodyNow(uint _id)
+        {
+            // Removed from the dictionary first, so a second remove call during DestroyBody does nothing
+            if (!_bodies.Remove(_id, out Body body)) return;
+            lock (_stateLock)
+            {
+                _bodyStates.Remove(_id);
+            }
+
+            // Box2D also destroys the body's joints
+            for (JointEdge edge = body.GetJointList(); edge != null; edge = edge.next)
+            {
+                if (edge.joint.UserData is uint jointID)
+                {
+                    _joints.Remove(jointID);
+                }
+            }
+
+            world.DestroyBody(body);
+        }
+
         /// <summary>
-        /// Gets the position of a physics body.
+        /// Gets the physics body associated with the given ID. Lock <see cref="WorldLock"/> while using it.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
+        public static Body GetBody(uint _id)
+        {
+            lock (WorldLock)
+            {
+                return _bodies.TryGetValue(_id, out Body body) ? body : null;
+            }
+        }
+        #endregion
+
+        #region Getters
+        /// <summary>
+        /// Gets the position of a physics body after the last step.
+        /// </summary>
         public static Vector2 GetBodyPosition(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return Vector2.Zero;
-            Vector2 vec = physicsBodies[_id].GetPosition();
-            return new Vector2(vec.X * WorldScalar, vec.Y * WorldScalar);
+            lock (_stateLock)
+            {
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.Position : Vector2.Zero;
+            }
         }
 
         /// <summary>
-        /// Gets the rotation of a physics body.
+        /// Gets the rotation (in degrees) of a physics body after the last step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
         public static float GetBodyRotation(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return 0;
-            return 180 / MathF.PI * physicsBodies[_id].GetAngle();
+            lock (_stateLock)
+            {
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.Rotation : 0;
+            }
         }
 
         /// <summary>
-        /// Gets the linear velocity of a physics body.
+        /// Gets the linear velocity of a physics body after the last step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
         public static Vector2 GetBodyVelocity(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return Vector2.Zero;
-            Vector2 vec = physicsBodies[_id].GetLinearVelocity();
-            return new Vector2(vec.X, vec.Y);
+            lock (_stateLock)
+            {
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.Velocity : Vector2.Zero;
+            }
         }
 
         /// <summary>
-        /// Gets the angular velocity of a physics body.
+        /// Gets the angular velocity of a physics body after the last step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
         public static float GetBodyAngularVelocity(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return 0;
-            return physicsBodies[_id].GetAngularVelocity();
+            lock (_stateLock)
+            {
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.AngularVelocity : 0;
+            }
         }
 
         /// <summary>
         /// Gets the filter data from the fixtures on a physics body.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
         public static Filter[] GetFilterData(uint _id)
         {
-            if (!physicsBodies.ContainsKey(_id)) return null;
-
-            List<Filter> filters = new List<Filter>();
-
-            Fixture f = physicsBodies[_id].GetFixtureList();
-            filters.Add(f.FilterData);
-            while (f.Next != null)
+            lock (WorldLock)
             {
-                f = f.Next;
-                filters.Add(f.FilterData);
-            }
+                if (!_bodies.TryGetValue(_id, out Body body)) return null;
 
-            return filters.ToArray();
-        }
-
-        /// <summary>
-        /// Gets the physics body associated with the given ID
-        /// </summary>
-        /// <param name="_id"></param>
-        /// <returns></returns>
-        public static Body GetBody(uint _id)
-        {
-            if (physicsBodies.ContainsKey(_id))
-            {
-                return physicsBodies[_id];
-            }
-            else
-            {
-                return null;
+                List<Filter> filters = new List<Filter>();
+                for (Fixture f = body.GetFixtureList(); f != null; f = f.Next)
+                {
+                    filters.Add(f.FilterData);
+                }
+                return filters.ToArray();
             }
         }
+        #endregion
 
+        #region Setters
         /// <summary>
-        /// Applies a force to a physics body.
+        /// Applies a force to a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_force"></param>
         /// <param name="_point">The point the force is applied to.</param>
         public static void ApplyForce(uint _id, Vector2 _force, Vector2 _point)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.ApplyForce, _id, new object[] { _force, _point }));
-            }
-            else
-            {
-                physicsBodies[_id].ApplyLinearImpulse(_force, _point);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyForce, ID = _id, Vector = _force, Point = _point });
         }
 
         /// <summary>
-        /// Applies an impulse to a physics body.
+        /// Applies an impulse to a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_impulse"></param>
-        /// <param name="_point">The point the force is applied to.</param>
+        /// <param name="_point">The point the impulse is applied to.</param>
         public static void ApplyImpulse(uint _id, Vector2 _impulse, Vector2 _point)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.ApplyImpulse, _id, new object[] { _impulse, _point }));
-            }
-            else
-            {
-                physicsBodies[_id].ApplyLinearImpulse(_impulse, _point);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyImpulse, ID = _id, Vector = _impulse, Point = _point });
         }
 
         /// <summary>
-        /// Applies a torque to a physics body.
+        /// Applies a torque to a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_torque"></param>
         public static void ApplyTorque(uint _id, float _torque)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.ApplyTorque, _id, new object[] { _torque }));
-            }
-            else
-            {
-                physicsBodies[_id].ApplyTorque(_torque);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyTorque, ID = _id, Value = _torque });
         }
 
         /// <summary>
-        /// Sets the angle (in degrees) of a physics body.
+        /// Sets the angle (in degrees) of a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_angle"></param>
         public static void SetAngle(uint _id, float _angle)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.ApplyTorque, _id, new object[] { _angle }));
-            }
-            else
-            {
-                physicsBodies[_id].SetTransform(physicsBodies[_id].Position, _angle * (MathF.PI / 180));
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetAngle, ID = _id, Value = _angle });
         }
 
         /// <summary>
-        /// Sets the angular velocity of a physics body.
+        /// Sets the angular velocity of a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_angle"></param>
         public static void SetAngularVelocity(uint _id, float _angularVelocity)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.SetAngularVelocity, _id, new object[] { _angularVelocity }));
-            }
-            else
-            {
-                physicsBodies[_id].SetAngularVelocity(_angularVelocity);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetAngularVelocity, ID = _id, Value = _angularVelocity });
         }
 
         /// <summary>
-        /// Sets the linear velocity of a physics body.
+        /// Sets the linear velocity of a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_linearVelocity"></param>
         public static void SetVelocity(uint _id, Vector2 _linearVelocity)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.SetVelocity, _id, new object[] { _linearVelocity }));
-            }
-            else
-            {
-                physicsBodies[_id].SetLinearVelocity(_linearVelocity);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetVelocity, ID = _id, Vector = _linearVelocity });
         }
 
         /// <summary>
-        /// Sets the position of a physics body. Use this instead of <see cref="Transform.Position"/> so that movements are handled within the physics engine.
+        /// Sets the position of a physics body on the next step. Use this instead of setting the node's position
+        /// so that movements are handled within the physics engine.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_position"></param>
         public static void SetPosition(uint _id, Vector2 _position)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.SetPosition, _id, new object[] { _position }));
-            }
-            else
-            {
-                physicsBodies[_id].SetTransform(_position / WorldScalar, physicsBodies[_id].GetAngle());
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetPosition, ID = _id, Vector = _position });
         }
 
         /// <summary>
-        /// Toggles the fixed rotation of a physics body.
+        /// Toggles the fixed rotation of a physics body on the next step.
         /// </summary>
-        /// <param name="_fixedRotation"></param>
         public static void SetBodyFixedRotation(uint _id, bool _fixedRotation)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.SetBodyFixedRotation, _id, new object[] { _fixedRotation }));
-            }
-            else
-            {
-                physicsBodies[_id].SetFixedRotation(_fixedRotation);
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetBodyFixedRotation, ID = _id, Flag = _fixedRotation });
         }
 
         /// <summary>
-        /// Sets the filter data of the fixtures on a physics body.
+        /// Sets the filter data of the fixtures on a physics body on the next step.
         /// </summary>
-        /// <param name="_id"></param>
-        /// <param name="_filter"></param>
         public static void SetFilterData(uint _id, Filter _filter)
         {
-            if (!physicsBodies.ContainsKey(_id)) return;
-            if(_stepLock)
-            {
-                physicsCallQueue.Enqueue((PhysicsCallType.SetFilterData, _id, new object[] { _filter }));
-            }
-            else
-            {
-                Fixture f = physicsBodies[_id].GetFixtureList();
-                f.FilterData = _filter;
-                f.Refilter();
-
-                while (f.Next != null)
-                {
-                    f = f.Next;
-                    f.FilterData = _filter;
-                    f.Refilter();
-                }
-            }
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetFilterData, ID = _id, Filter = _filter });
         }
+        #endregion
 
         /// <summary>
         /// Casts a ray into the physics world, and returns the hit data.
@@ -536,15 +528,16 @@ namespace Atlas2D.PhysicsBox2D
         /// <param name="_point">The starting point of the ray.</param>
         /// <param name="_direction">The direction of the ray.</param>
         /// <param name="_maxDistance">The maximum distance the ray can travel.</param>
-        /// <param name="_solidShapes"></param>
-        /// <returns></returns>
         public static bool Raycast(Vector2 _point, Vector2 _direction, float _maxDistance, out RaycastHit hit)
         {
             hit = new RaycastHit();
             hit.MaxDistance = _maxDistance;
             try
             {
-                world.RayCast(hit.Callback, _point, _point + (_direction * _maxDistance));
+                lock (WorldLock)
+                {
+                    world.RayCast(hit.Callback, _point, _point + (_direction * _maxDistance));
+                }
             }
             catch (Exception e)
             {

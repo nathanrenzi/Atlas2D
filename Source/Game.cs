@@ -9,6 +9,7 @@ using Atlas2D.UI;
 using GLFW;
 
 using System.Numerics;
+using System.Runtime.InteropServices;
 using static Atlas2D.OpenGL.GL;
 
 namespace Atlas2D
@@ -21,11 +22,16 @@ namespace Atlas2D
         public Color BackgroundColor { get; private set; } = Color.Black;
         public Vector4 LinearBackgroundColor { get; private set; } = Vector4.Zero;
 
+        // Physics can fall behind during a hitch. These stop it from trying to catch up forever.
+        private const int MAX_PHYSICS_STEPS_PER_TICK = 5;
+        private const int MAX_FIXED_UPDATES_PER_FRAME = 5;
+
         protected Thread PhysicsThread { get; private set; }
         protected CancellationTokenSource PhysicsCancellationToken { get; private set; } = new();
         protected CameraNode DefaultCamera { get; set; }
 
-        private bool _doFixedUpdate = false;
+        // Steps finished by the physics thread that haven't had a FixedUpdate yet
+        private int _pendingFixedUpdates = 0;
         // _classes keeps update order, and the sets allow for O(1) Contains() calls
         private List<IGameClass> _classes = new List<IGameClass>();
         private HashSet<IGameClass> _classesSet = new HashSet<IGameClass>();
@@ -142,8 +148,11 @@ namespace Atlas2D
 
             // Starting Physics Thread
             PhysicsThread = new Thread(() => RunPhysicsThread(PhysicsCancellationToken.Token, ProjectSettings.PhysicsTimestep,
-                new Vector2(0, ProjectSettings.PhysicsGravity), true, ProjectSettings.PhysicsVelocityIterations,
-                ProjectSettings.PhysicsPositionIterations));
+                ProjectSettings.PhysicsVelocityIterations, ProjectSettings.PhysicsPositionIterations))
+            {
+                Name = "Physics",
+                IsBackground = true
+            };
 
             Initialize();
 
@@ -215,6 +224,7 @@ namespace Atlas2D
             #endregion
 
             // Initializing physics thread
+            Physics.Initialize(new Vector2(0, ProjectSettings.PhysicsGravity), true);
             PhysicsThread.Start();
 
             Network.RegisterAll();
@@ -266,7 +276,10 @@ namespace Atlas2D
 
                 // Physics
                 double phyST = Glfw.Time;
-                if (_doFixedUpdate)
+                // One FixedUpdate per physics step since the last frame
+                int fixedUpdates = Math.Min(Interlocked.Exchange(ref _pendingFixedUpdates, 0), MAX_FIXED_UPDATES_PER_FRAME);
+                Time.FixedDeltaTime = ProjectSettings.PhysicsTimestep;
+                for (int step = 0; step < fixedUpdates; step++)
                 {
                     _useClassesQueue = true;
                     foreach (IGameClass gameClass in _classes)
@@ -274,7 +287,6 @@ namespace Atlas2D
                         if (_classesRemoveQueue.Contains(gameClass)) continue;
                         gameClass.FixedUpdate();
                     }
-                    _doFixedUpdate = false;
                     _useClassesQueue = false;
                     PopClassesQueue();
                 }
@@ -303,25 +315,54 @@ namespace Atlas2D
             Exit(false);
         }
 
-        private void RunPhysicsThread(CancellationToken token, double physicsTimestep, Vector2 gravity,
-            bool doSleep, int velocityIterations = 8, int positionIterations = 2)
+        [DllImport("winmm.dll")]
+        private static extern uint timeBeginPeriod(uint period);
+
+        [DllImport("winmm.dll")]
+        private static extern uint timeEndPeriod(uint period);
+
+        private void RunPhysicsThread(CancellationToken token, float physicsTimestep, int velocityIterations, int positionIterations)
         {
-            Physics.Initialize(gravity, doSleep);
-
-            double lastTickTime = 0;
-            while (!token.IsCancellationRequested)
+            // Lets Thread.Sleep(1) sleep for about 1ms instead of about 15ms on Windows
+            bool raisedTimerResolution = OperatingSystem.IsWindows() && timeBeginPeriod(1) == 0;
+            try
             {
-                double time = Glfw.Time;
-                if (lastTickTime + physicsTimestep <= time)
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                double nextStepTime = physicsTimestep;
+                while (!token.IsCancellationRequested)
                 {
-                    double delta = time - lastTickTime;
-                    Time.FixedDeltaTime = (float)delta;
-                    lastTickTime = time;
+                    double time = stopwatch.Elapsed.TotalSeconds;
+                    if (time < nextStepTime)
+                    {
+                        // Sleep while there's time to spare instead of spinning the CPU
+                        if (nextStepTime - time > 0.002) Thread.Sleep(1);
+                        else Thread.Yield();
+                        continue;
+                    }
 
-                    // Do Physics Tick
-                    Physics.Step((float)delta, velocityIterations, positionIterations);
-                    _doFixedUpdate = true;
+                    int steps = 0;
+                    while (time >= nextStepTime && steps < MAX_PHYSICS_STEPS_PER_TICK)
+                    {
+                        try
+                        {
+                            Physics.Step(physicsTimestep, velocityIterations, positionIterations);
+                        }
+                        catch (System.Exception e)
+                        {
+                            Debug.LogError($"PHYSICS: Step failed. {e}");
+                        }
+                        Interlocked.Increment(ref _pendingFixedUpdates);
+                        nextStepTime += physicsTimestep;
+                        steps++;
+                    }
+
+                    // Too far behind, so skip the missed time
+                    if (time >= nextStepTime) nextStepTime = time + physicsTimestep;
                 }
+            }
+            finally
+            {
+                if (raisedTimerResolution) timeEndPeriod(1);
             }
         }
 
