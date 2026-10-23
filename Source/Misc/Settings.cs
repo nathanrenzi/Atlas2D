@@ -25,7 +25,7 @@ namespace Atlas2D
                 Monitor = (int)Glfw.PrimaryMonitor.UserPointer;
                 WindowHeight = 0;
                 WindowWidth = 0;
-                WindowMode = WindowMode.Fullscreen;
+                WindowMode = WindowMode.BorderlessWindow;
                 Vsync = true;
                 AntialiasingMode = AntialiasingMode.FXAA;
                 RefreshRate = 0;
