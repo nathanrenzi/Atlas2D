@@ -305,6 +305,7 @@ namespace Atlas2D.UI
 
         private void Update()
         {
+            DropFocusIfHidden();
             ProcessInput();
             UpdateLayout();
         }
@@ -436,22 +437,7 @@ namespace Atlas2D.UI
 
                         _draggedElement = hitElement;
 
-                        if (_focusedElement != hitElement)
-                        {
-                            _focusedElement?.RaiseEvent(new UIEvent
-                            {
-                                Type = UIEventType.LoseFocus,
-                                Target = _focusedElement,
-                                Phase = EventPhase.Target
-                            });
-                            _focusedElement = hitElement;
-                            hitElement.RaiseEvent(new UIEvent
-                            {
-                                Type = UIEventType.GainFocus,
-                                Target = hitElement,
-                                Phase = EventPhase.Target
-                            });
-                        }
+                        SetFocus(hitElement);
                     }
 
                     if (Input.GetMouseButtonDown(MouseButton.Right))
@@ -532,16 +518,7 @@ namespace Atlas2D.UI
                         || Input.GetMouseButtonDown(MouseButton.Right)
                         || Input.GetMouseButtonDown(MouseButton.Middle))
                     {
-                        if (_focusedElement != null)
-                        {
-                            _focusedElement.RaiseEvent(new UIEvent
-                            {
-                                Type = UIEventType.LoseFocus,
-                                Target = _focusedElement,
-                                Phase = EventPhase.Target
-                            });
-                            _focusedElement = null;
-                        }
+                        SetFocus(null);
                     }
                 }
             }
@@ -596,17 +573,7 @@ namespace Atlas2D.UI
         /// <param name="element">The element to focus.</param>
         public void Focus(UIElement element)
         {
-            if (_focusedElement == element) return;
-
-            _focusedElement?.RaiseEvent(new UIEvent
-            {
-                Type = UIEventType.LoseFocus,
-                Target = _focusedElement,
-                Phase = EventPhase.Target
-            });
-
-            _focusedElement = element;
-            element.Focused = true;
+            SetFocus(element);
         }
 
         /// <summary>
@@ -616,9 +583,50 @@ namespace Atlas2D.UI
         public void Unfocus(UIElement element)
         {
             if (element != _focusedElement) return;
+            SetFocus(null);
+        }
 
-            element.Focused = false;
-            _focusedElement = null;
+        // Every focus change goes through here, so elements always get their GainFocus/LoseFocus events
+        private void SetFocus(UIElement element)
+        {
+            if (_focusedElement == element) return;
+
+            UIElement oldElement = _focusedElement;
+            _focusedElement = element;
+            if (oldElement != null)
+            {
+                oldElement.Focused = false;
+                oldElement.RaiseEvent(new UIEvent
+                {
+                    Type = UIEventType.LoseFocus,
+                    Target = oldElement,
+                    Phase = EventPhase.Target
+                });
+            }
+            if (element != null)
+            {
+                element.Focused = true;
+                element.RaiseEvent(new UIEvent
+                {
+                    Type = UIEventType.GainFocus,
+                    Target = element,
+                    Phase = EventPhase.Target
+                });
+            }
+        }
+
+        // A hidden or disabled element can't keep focus. Otherwise a text box that was hidden while
+        // focused would keep blocking keyboard input.
+        private void DropFocusIfHidden()
+        {
+            for (UIElement element = _focusedElement; element != null; element = element.Parent)
+            {
+                if (!element.Visible || !element.Enabled)
+                {
+                    SetFocus(null);
+                    return;
+                }
+            }
         }
     }
 }
