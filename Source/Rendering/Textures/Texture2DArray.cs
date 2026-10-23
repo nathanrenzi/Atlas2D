@@ -3,15 +3,15 @@ using static Atlas2D.OpenGL.GL;
 
 namespace Atlas2D.Rendering
 {
-    public class Texture2DArray : ITexture, IDisposable
+    public class Texture2DArray : IDisposable
     {
         private bool _disposed;
-        public uint Handle { get; private set; }
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int Layers { get; set; }
+        private bool? _linearFiltering;
+        public uint Handle { get; }
+        public int Width { get; }
+        public int Height { get; }
+        public int Layers { get; }
         public bool NonColor { get; }
-        public int GetTextureLayers() => Layers;
 
         public Texture2DArray(uint handle, int width, int height, int layers, bool nonColor)
         {
@@ -19,9 +19,8 @@ namespace Atlas2D.Rendering
             Width = width;
             Height = height;
             Layers = layers;
+            NonColor = nonColor;
         }
-
-        public uint GetHandle() => Handle;
 
         public Vector2 GetSize() => new Vector2(Width, Height);
 
@@ -31,11 +30,13 @@ namespace Atlas2D.Rendering
             glBindTexture(GL_TEXTURE_2D_ARRAY, Handle);
         }
 
-        public void SetFilteringMode(bool _linear)
+        public void SetFilteringMode(bool linear)
         {
+            if (_linearFiltering == linear) return;
+            _linearFiltering = linear;
             Use(GL_TEXTURE0);
 
-            if (_linear)
+            if (linear)
             {
                 // Linear filtering
                 glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -49,12 +50,19 @@ namespace Atlas2D.Rendering
             }
         }
 
-        public void Dispose(bool _disposing)
+        private void Dispose(bool disposing)
         {
             if (!_disposed)
             {
-                glDeleteTexture(Handle);
-                _disposed = true;
+                try
+                {
+                    glDeleteTexture(Handle);
+                    _disposed = true;
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Could not dispose texture {Handle}: {e.Message}");
+                }
             }
         }
         public void Dispose()

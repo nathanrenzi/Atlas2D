@@ -6,11 +6,11 @@ using static Atlas2D.OpenGL.GL;
 
 namespace Atlas2D.Rendering
 {
-    public class Texture2D : ITexture, IDisposable
+    public class Texture2D : IDisposable
     {
         private bool _disposed;
         private bool? _linearFiltering;
-        public uint Handle { get; private set; }
+        public uint Handle { get; }
         public int Width { get; set; }
         public int Height { get; set; }
         public string FilePath { get; }
@@ -24,8 +24,6 @@ namespace Atlas2D.Rendering
             FilePath = filePath;
             NonColor = nonColor;
         }
-
-        public uint GetHandle() => Handle;
 
         public Vector2 GetSize() => new Vector2(Width, Height);
 
