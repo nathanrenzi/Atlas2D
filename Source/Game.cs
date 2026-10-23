@@ -43,6 +43,7 @@ namespace Atlas2D
         private BlendMode _currentBlendMode = BlendMode.Interpolative;
         private bool _isGraphicsInitialized = false;
         private bool _hasExited = false;
+        private bool _exitRequested = false;
 
         protected Game()
         {
@@ -143,6 +144,21 @@ namespace Atlas2D
 
         public void Run()
         {
+            Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+            AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+
+            try
+            {
+                RunGame();
+            }
+            catch (System.Exception e)
+            {
+                Crash(e);
+            }
+        }
+
+        private void RunGame()
+        {
             Debug.OpenLogFile();
             Debug.Log("Starting initialization...");
             Engine.Initialize(this);
@@ -160,6 +176,11 @@ namespace Atlas2D
             };
 
             Initialize();
+            if (_exitRequested)
+            {
+                Shutdown();
+                return;
+            }
 
             DefaultCamera = new CameraNode();
 
@@ -322,7 +343,7 @@ namespace Atlas2D
                 // -------------------------------
             }
 
-            Exit(false);
+            Shutdown(false);
         }
 
         [DllImport("winmm.dll")]
@@ -412,40 +433,75 @@ namespace Atlas2D
         /// </summary>
         public void Exit()
         {
-            if(_hasExited) return;
-            Glfw.SetWindowShouldClose(Display.Window, true);
+            if (_hasExited) return;
+            _exitRequested = true;
+            if (Display.Window != Window.None)
+                Glfw.SetWindowShouldClose(Display.Window, true);
         }
 
-        private void Exit(bool terminateGlfw = true)
+        private void Shutdown(bool terminateGlfw = true)
         {
             if (_hasExited) return;
             _hasExited = true;
 
-            OnGameClose();
+            ShutdownStep(OnGameClose);
             List<IGameClass> classesCopy = new List<IGameClass>(_classes);
 
             // Network goes first, so disconnect events run while the rest of the game still exists
             foreach (IGameClass gameClass in classesCopy)
             {
-                if (gameClass is Network) gameClass.Dispose();
+                if (gameClass is Network) ShutdownStep(gameClass.Dispose);
             }
             foreach (IGameClass gameClass in classesCopy)
             {
-                if (gameClass is not Network) gameClass.Dispose();
+                if (gameClass is not Network) ShutdownStep(gameClass.Dispose);
             }
-            PhysicsCancellationToken.Cancel();
-            PhysicsThread.Join();
-            PhysicsCancellationToken.Dispose();
-            Material.Shutdown();
-            GlobalShaders.Shutdown();
-            AudioSystem.Shutdown();
-            Resources.Shutdown();
-            Debug.CloseLogFile();
+            ShutdownStep(() =>
+            {
+                PhysicsCancellationToken.Cancel();
+                if (PhysicsThread != null && PhysicsThread.ThreadState != ThreadState.Unstarted)
+                    PhysicsThread.Join();
+                PhysicsCancellationToken.Dispose();
+            });
+            ShutdownStep(Material.Shutdown);
+            ShutdownStep(GlobalShaders.Shutdown);
+            ShutdownStep(AudioSystem.Shutdown);
+            ShutdownStep(Resources.Shutdown);
             if (terminateGlfw)
             {
-                Display.DestroyWindow();
-                Glfw.Terminate();
+                ShutdownStep(Display.DestroyWindow);
+                ShutdownStep(Glfw.Terminate);
             }
+            Debug.CloseLogFile();
+        }
+
+        private static void ShutdownStep(Action step)
+        {
+            try
+            {
+                step();
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"Error during shutdown: {e}");
+            }
+        }
+
+        private void Crash(System.Exception e)
+        {
+            string message = e is FatalException ? e.Message : $"An unexpected error occurred.\n\n{e.GetType().Name}: {e.Message}";
+            Debug.LogError($"FATAL: {e}");
+            Shutdown();
+            FatalErrorDialog.Show(message);
+            Environment.ExitCode = 1;
+        }
+
+        private void OnUnhandledException(object sender, UnhandledExceptionEventArgs args)
+        {
+            System.Exception e = args.ExceptionObject as System.Exception;
+            Debug.LogError($"FATAL: Unhandled exception on thread {Thread.CurrentThread.Name ?? Thread.CurrentThread.ManagedThreadId.ToString()}: {args.ExceptionObject}");
+            Debug.CloseLogFile();
+            FatalErrorDialog.Show(e is FatalException ? e.Message : $"An unexpected error occurred.\n\n{e?.GetType().Name}: {e?.Message}");
         }
 
         protected virtual void Initialize() { }      // This is ran when the game is first initialized

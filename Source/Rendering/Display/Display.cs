@@ -23,7 +23,8 @@ namespace Atlas2D
 
         public static void Initialize()
         {
-            Glfw.Init();
+            if (!Glfw.Init())
+                throw new FatalException($"Could not initialize the windowing system.\n\n{Glfw.LastErrorDescription}");
             AssignMonitorPointers();
         }
 
@@ -63,8 +64,8 @@ namespace Atlas2D
 
             if (Window == Window.None)
             {
-                Debug.LogError("Error creating window.");
-                return;
+                throw new FatalException("Could not create the game window. This game requires a graphics card that supports OpenGL 3.3. " +
+                    $"Try updating your graphics drivers.\n\n{Glfw.LastErrorDescription}");
             }
 
             Glfw.MakeContextCurrent(Window);
@@ -91,7 +92,7 @@ namespace Atlas2D
             _windowResizeCallback = new SizeCallback(OnFramebufferResize);
             Glfw.SetFramebufferSizeCallback(Window, _windowResizeCallback);
 
-            _monitorCallback = new MonitorCallback((monitor, connection) => AssignMonitorPointers());
+            _monitorCallback = new MonitorCallback((monitor, connection) => NativeCallbackGuard.Run(AssignMonitorPointers));
             Glfw.SetMonitorCallback(_monitorCallback);
 
             _fxaaPostProcessing.Add(new FXAAPostProcess());
@@ -107,7 +108,7 @@ namespace Atlas2D
 
         private static void OnFramebufferResize(Window window, int width, int height)
         {
-            UpdateWindowSize(width, height);
+            NativeCallbackGuard.Run(() => UpdateWindowSize(width, height));
         }
 
         private static void UpdateWindowSize(int width, int height)
@@ -194,6 +195,7 @@ namespace Atlas2D
 
         public static void DestroyWindow()
         {
+            if (Window == Window.None) return;
             Glfw.DestroyWindow(Window);
             Window = Window.None;
         }

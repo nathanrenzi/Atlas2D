@@ -6,6 +6,9 @@ namespace Atlas2D
 {
     public class Settings
     {
+        private const string FilePath = "Settings.json";
+        private const string CorruptFilePath = "Settings.corrupt.json";
+
         public class SettingsJson
         {
             public int Monitor { get; set; }
@@ -75,24 +78,25 @@ namespace Atlas2D
 
         public static Settings Load()
         {
-            string json;
-            bool setDisplaySettings = false;
-            if(File.Exists("Settings.json"))
+            SettingsJson settingsJson = null;
+            if (File.Exists(FilePath))
             {
-                json = File.ReadAllText("Settings.json");
-            }
-            else
-            {
-                json = "";
-                setDisplaySettings = true;
-            }
+                try
+                {
+                    settingsJson = JsonConvert.DeserializeObject<SettingsJson>(File.ReadAllText(FilePath));
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"Could not read {FilePath}: {e.Message}");
+                }
 
-            SettingsJson settingsJson = string.IsNullOrEmpty(json) ? new SettingsJson() : JsonConvert.DeserializeObject<SettingsJson>(json);
-            if (settingsJson == null)
-            {
-                Debug.LogError("Error reading settings file.");
-                Engine.Game.Exit();
+                if (settingsJson == null)
+                {
+                    Debug.LogWarning($"{FilePath} is corrupt, so default settings will be used. The old file was moved to {CorruptFilePath}");
+                    File.Move(FilePath, CorruptFilePath, true);
+                }
             }
+            settingsJson ??= new SettingsJson();
 
             GLFW.Monitor monitor = GLFW.Monitor.None;
             bool foundMonitor = false;
@@ -128,7 +132,9 @@ namespace Atlas2D
             SettingsJson settingsJson = new SettingsJson((int)Monitor.UserPointer, WindowWidth, WindowHeight, WindowMode,
                 Vsync, AntialiasingMode, RefreshRate, AudioMasterVolume);
             string json = JsonConvert.SerializeObject(settingsJson, Formatting.Indented);
-            File.WriteAllText("Settings.json", json);
+            string tempPath = FilePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, FilePath, true);
         }
     }
 }

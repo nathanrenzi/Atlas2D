@@ -14,6 +14,12 @@ namespace Atlas2D
         private static int _messageCount = 1;
         private static bool _hasLoggedMessage = false;
         private static StreamWriter _logFile = null;
+        private static readonly object _writeLock = new object();
+
+        /// <summary>
+        /// The full path of the current log file.
+        /// </summary>
+        public static string LogFilePath { get; private set; } = "";
 
         /// <summary>
         /// Used to log formatted and togglable messages to the console and the latest log file.
@@ -31,10 +37,7 @@ namespace Atlas2D
         public static void Log(object message, ConsoleColor messageColor)
         {
             if (!DebuggingEnabled || !EnableLogMessages) return;
-
-            Console.ForegroundColor = messageColor;
-            Write($"{message}");
-            Console.ForegroundColor = ConsoleColor.White;
+            Write($"{message}", messageColor);
         }
 
         /// <summary>
@@ -44,10 +47,7 @@ namespace Atlas2D
         public static void LogError(object message)
         {
             if (!DebuggingEnabled || !EnableErrorMessages) return;
-
-            Console.ForegroundColor = ConsoleColor.Red;
-            Write($"ERROR: {message}");
-            Console.ForegroundColor = ConsoleColor.White;
+            Write($"ERROR: {message}", ConsoleColor.Red);
         }
 
         /// <summary>
@@ -57,13 +57,20 @@ namespace Atlas2D
         public static void LogWarning(object message)
         {
             if (!DebuggingEnabled || !EnableWarningMessages) return;
-
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Write($"WARNING: {message}");
-            Console.ForegroundColor = ConsoleColor.White;
+            Write($"WARNING: {message}", ConsoleColor.Yellow);
         }
 
-        private static void Write(string message)
+        private static void Write(string message, ConsoleColor color)
+        {
+            lock (_writeLock)
+            {
+                Console.ForegroundColor = color;
+                WriteUnlocked(message);
+                Console.ForegroundColor = ConsoleColor.White;
+            }
+        }
+
+        private static void WriteUnlocked(string message)
         {
             if (_lastMessage.Equals(message) && EnableCollapsing)
             {
@@ -103,13 +110,17 @@ namespace Atlas2D
             {
                 Directory.CreateDirectory("Logs");
             }
-            _logFile = new StreamWriter(File.Create("Logs/latest.txt")); 
+            LogFilePath = Path.GetFullPath("Logs/latest.txt");
+            _logFile = new StreamWriter(File.Create(LogFilePath)) { AutoFlush = true };
         }
 
         public static void CloseLogFile()
         {
-            _logFile.Close();
-            _logFile = null;
+            lock (_writeLock)
+            {
+                _logFile?.Close();
+                _logFile = null;
+            }
         }
     }
 }

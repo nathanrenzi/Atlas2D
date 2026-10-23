@@ -11,9 +11,12 @@ namespace Atlas2D
         private static Dictionary<string, SharedResource<Texture2D>> textureCache = new();
         private static Dictionary<uint, SharedResource<Texture2D>> textureHandleCache = new();
         private static Dictionary<FontArgs, SharedResource<FontGlyphStore>> fontCache = new();
+        private static SharedResource<Texture2D> missingTexture;
 
         internal static void Shutdown()
         {
+            missingTexture?.Release();
+            missingTexture = null;
             foreach (var handle in textureCache.Values) handle.Release();
             foreach (var handle in textureArrayCache.Values) handle.Release();
             foreach (var handle in fontCache.Values) handle.Release();
@@ -81,17 +84,42 @@ namespace Atlas2D
         #endregion
 
         #region Textures
+        /// <summary>
+        /// Gets a cached texture. If the file is missing or can't be read, a magenta and black placeholder is returned instead.
+        /// </summary>
         public static SharedResource<Texture2D> GetTexture(string path, bool nonColor = false)
         {
-            if (!ValidatePath(path)) return null;
             if (!textureCache.TryGetValue(path, out var handle))
             {
-                var texture = TextureFactory.Load(path, nonColor);
+                if (!ValidatePath(path)) return GetMissingTexture();
+
+                Texture2D texture;
+                try
+                {
+                    texture = TextureFactory.Load(path, nonColor);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Could not load texture {path}: {e.Message}");
+                    return GetMissingTexture();
+                }
+
                 handle = SharedResource<Texture2D>.Create(texture);
                 textureCache.Add(path, handle);
                 textureHandleCache.Add(texture.Handle, handle);
             }
             return handle.AddRef();
+        }
+
+        private static SharedResource<Texture2D> GetMissingTexture()
+        {
+            if (missingTexture == null)
+            {
+                Texture2D texture = TextureFactory.CreateMissingTexture();
+                missingTexture = SharedResource<Texture2D>.Create(texture);
+                textureHandleCache.Add(texture.Handle, missingTexture);
+            }
+            return missingTexture.AddRef();
         }
 
         public static SharedResource<Texture2D> GetTexture(uint handle)

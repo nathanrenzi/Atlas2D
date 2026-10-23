@@ -153,20 +153,31 @@ namespace Atlas2D.Networking.Core
         /// <param name="maxClientCount">The maximum amount of clients that can be connected at a certain time.</param>
         /// <param name="port">The port that the server should use. Note: This is only used when the server is set to <see cref="TransportMode.NetworkP2P"/>.</param>
         /// <param name="password">The (optional) password to use for the server.</param>
-        public void Start(ushort maxClientCount, ushort port = 25565, string password = "")
+        /// <returns>True if the server started, false if it couldn't, for example because the port is already in use.</returns>
+        public bool Start(ushort maxClientCount, ushort port = 25565, string password = "")
         {
-            if (IsRunning) return;
+            if (IsRunning) return true;
             _serverPassword = password;
             HostKey = Guid.NewGuid().ToString("N");
-            if(_networkMode == TransportMode.NetworkP2P)
+            try
             {
-                RiptideServer.Start(port, maxClientCount, useMessageHandlers: false);
+                if (_networkMode == TransportMode.NetworkP2P)
+                {
+                    RiptideServer.Start(port, maxClientCount, useMessageHandlers: false);
+                }
+                else
+                {
+                    RiptideServer.Start(ProjectSettings.SteamPort, maxClientCount, useMessageHandlers: false);
+                }
             }
-            else
+            catch (Exception e)
             {
-                RiptideServer.Start(ProjectSettings.SteamPort, maxClientCount, useMessageHandlers: false);
+                Debug.LogError($"(SERVER): Could not start the server. {e.Message}");
+                RiptideServer.Stop();
+                return false;
             }
             TimeStarted = DateTime.UtcNow.Ticks;
+            return true;
         }
 
         /// <summary>

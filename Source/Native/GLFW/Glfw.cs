@@ -1857,9 +1857,15 @@ namespace GLFW
             revision = GetWindowAttribute(window, (int) ContextAttributes.ContextVersionRevision);
         }
 
+        /// <summary>
+        ///     The description of the most recent GLFW error.
+        /// </summary>
+        public static string LastErrorDescription { get; private set; }
+
         private static void GlfwError(ErrorCode code, IntPtr message)
         {
-            throw new Exception(Util.PtrToStringUTF8(message));
+            LastErrorDescription = $"{code}: {Util.PtrToStringUTF8(message)}";
+            Atlas2D.Debug.LogError($"GLFW {LastErrorDescription}");
         }
 
         #endregion

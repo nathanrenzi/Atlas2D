@@ -6,6 +6,38 @@ namespace Atlas2D.Rendering
 {
     public static class TextureFactory
     {
+        internal static unsafe Texture2D CreateMissingTexture()
+        {
+            const int size = 8;
+            byte[] pixels = new byte[size * size * 4];
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    bool magenta = (x / 4 + y / 4) % 2 == 0;
+                    int i = (x + y * size) * 4;
+                    pixels[i] = magenta ? (byte)255 : (byte)0;
+                    pixels[i + 1] = 0;
+                    pixels[i + 2] = magenta ? (byte)255 : (byte)0;
+                    pixels[i + 3] = 255;
+                }
+            }
+
+            uint handle = glGenTexture();
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, handle);
+            fixed (byte* data = pixels)
+            {
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB_ALPHA, size, size, 0, GL_BGRA, GL_UNSIGNED_BYTE, (IntPtr)data);
+            }
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+            return new Texture2D(handle, size, size, "", false);
+        }
+
         public static Texture2D Load(string filePath, bool nonColor)
         {
             if (!File.Exists(filePath))

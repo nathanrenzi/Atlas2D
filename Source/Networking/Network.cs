@@ -81,16 +81,10 @@ namespace Atlas2D.Networking
         {
             _initialized = true;
             TransportMode = TransportMode.SteamP2P;
-            uint steamAppID;
-            if(File.Exists("steam_appid.txt"))
-            {
-                steamAppID = uint.Parse(File.ReadAllText("steam_appid.txt"));
-            }
-            else
-            {
-                Debug.LogError("[Steamworks.NET] steam_appid.txt cannot be found.");
-                return;
-            }
+            if (!File.Exists("steam_appid.txt"))
+                throw new FatalException("steam_appid.txt is missing, so Steam can't be started.");
+            if (!uint.TryParse(File.ReadAllText("steam_appid.txt").Trim(), out uint steamAppID))
+                throw new FatalException("steam_appid.txt doesn't contain a valid Steam app ID.");
 
             Debug.Log("\n");
             if (!Packsize.Test())
@@ -103,18 +97,15 @@ namespace Atlas2D.Networking
                 {
                     Debug.Log("[Steamworks.NET] Game was not started through steam. Restarting...");
                     Engine.Game.Exit();
+                    return;
                 }
             }
             catch (DllNotFoundException e)
             {
-                Debug.LogError("[Steamworks.NET] Could not load steam_api.dll.\n" + e.Message);
-                Engine.Game.Exit();
+                throw new FatalException("steam_api64.dll is missing. Try verifying the game files.", e);
             }
             if (!SteamAPI.Init())
-            {
-                Debug.LogError("[Steamworks.NET] Steam API could not be initialized.");
-                Engine.Game.Exit();
-            }
+                throw new FatalException("Could not connect to Steam. Make sure Steam is running and you're logged in, then try again.");
             RiptideLogger.Initialize(Debug.Log, Debug.Log, Debug.Log, Debug.LogError, false);
 
             Client = new Core.Client(TransportMode);

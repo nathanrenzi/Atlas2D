@@ -121,10 +121,13 @@ namespace Atlas2D
                 IsPressed = true
             };
 
-            for (int i = 0; i < _keyListeners.Count; i++)
+            NativeCallbackGuard.Run(() =>
             {
-                _keyListeners[i].OnKeyEvent(evt);
-            }
+                for (int i = 0; i < _keyListeners.Count; i++)
+                {
+                    _keyListeners[i].OnKeyEvent(evt);
+                }
+            });
         }
 
         private static void JoystickCallback(Joystick joystick, ConnectionStatus status)
@@ -146,7 +149,7 @@ namespace Atlas2D
                     break;
             }
             GAMEPADSTATES[(int)joystick] = new GamePadState();
-            OnGamepadConnectionStatusChange?.Invoke((int)joystick, gamepadStatus);
+            NativeCallbackGuard.Run(() => OnGamepadConnectionStatusChange?.Invoke((int)joystick, gamepadStatus));
         }
 
         private static void ScrollCallback(Window window, double xOffset, double yOffset)
@@ -176,6 +179,7 @@ namespace Atlas2D
             }
 
             Glfw.PollEvents();
+            NativeCallbackGuard.RethrowPending();
             if (!_scrollCallbackFrame)
             {
                 // If the scroll delta was not updated this frame, set the delta to 0

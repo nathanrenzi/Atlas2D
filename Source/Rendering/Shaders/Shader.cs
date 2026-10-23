@@ -70,6 +70,7 @@ namespace Atlas2D.Rendering.Shaders
             if (glGetShaderiv(vs, GL_COMPILE_STATUS, 1)[0] == 0)
             {
                 Debug.LogError("Vertex Shader: " + glGetShaderInfoLog(vs));
+                glDeleteShader(vs);
                 return false;
             }
 
@@ -80,6 +81,8 @@ namespace Atlas2D.Rendering.Shaders
             if (glGetShaderiv(fs, GL_COMPILE_STATUS, 1)[0] == 0)
             {
                 Debug.LogError("Fragment Shader: " + glGetShaderInfoLog(fs));
+                glDeleteShader(vs);
+                glDeleteShader(fs);
                 return false;
             }
 
@@ -92,6 +95,14 @@ namespace Atlas2D.Rendering.Shaders
             glDetachShader(ProgramID, fs);
             glDeleteShader(vs);
             glDeleteShader(fs);
+
+            if (glGetProgramiv(ProgramID, GL_LINK_STATUS, 1)[0] == 0)
+            {
+                Debug.LogError("Shader Program: " + glGetProgramInfoLog(ProgramID));
+                glDeleteProgram(ProgramID);
+                ProgramID = 0;
+                return false;
+            }
 
             Compiled = true;
             ShaderGlobalUniforms.RegisterShader(this);
