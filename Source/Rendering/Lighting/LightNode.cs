@@ -75,11 +75,14 @@
             Intensity = intensity;
 
             OnTransformChanged += () => IsDirty = true;
-
-            LightManager.Instance.RegisterLight(this, type);
         }
 
-        protected override void OnDispose()
+        protected override void OnEnable()
+        {
+            LightManager.Instance.RegisterLight(this, Type);
+        }
+
+        protected override void OnDisable()
         {
             LightManager.Instance.UnregisterLight(this, Type);
         }

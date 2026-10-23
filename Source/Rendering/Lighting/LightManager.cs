@@ -46,8 +46,13 @@ namespace Atlas2D
         public const int MAX_DIRECTIONAL_LIGHTS = 1;
         public List<LightNode> DirectionalLightsInScene = new List<LightNode>();
 
+        private int _lastPointLightCount = -1;
+        private Color _lastAmbientColor;
+        private bool _loggedLimit = false;
+
         public void RegisterLight(LightNode _light, LightType _type)
         {
+            if (GetList(_type).Contains(_light)) return;
             switch (_type)
             {
                 case LightType.Point:
@@ -78,8 +83,22 @@ namespace Atlas2D
             }
         }
 
+        private List<LightNode> GetList(LightType _type) => _type switch
+        {
+            LightType.Spot => SpotLightsInScene,
+            LightType.Directional => DirectionalLightsInScene,
+            _ => PointLightsInScene,
+        };
+
         public void CheckDirty()
         {
+            if (PointLightsInScene.Count != _lastPointLightCount || !AmbientColor.Equals(_lastAmbientColor))
+            {
+                IsDirty = true;
+                _lastPointLightCount = PointLightsInScene.Count;
+                _lastAmbientColor = AmbientColor;
+            }
+
             for (int i = 0; i < PointLightsInScene.Count; i++)
             {
                 if (PointLightsInScene[i].IsDirty)
@@ -93,24 +112,31 @@ namespace Atlas2D
         public void ApplyUniform(Shader _shader)
         {
             _shader.SetColor("ambientColor", AmbientColor);
-            for (int i = 0; i < PointLightsInScene.Count; i++)
+            for (int i = 0; i < MAX_POINT_LIGHTS; i++)
             {
+                if (i >= PointLightsInScene.Count)
+                {
+                    // Clear empty slots
+                    _shader.SetFloat($"pointLights[{i}].initialized", 0);
+                    _shader.SetFloat($"pointLights[{i}].intensity", 0);
+                    continue;
+                }
+
                 LightNode l = PointLightsInScene[i];
-                if (i < MAX_POINT_LIGHTS)
-                {
-                    _shader.SetFloat($"pointLights[{i}].initialized", 1);
-                    _shader.SetVector2($"pointLights[{i}].position", l.WorldPosition);
-                    _shader.SetFloat($"pointLights[{i}].height", l.Height);
-                    _shader.SetFloat($"pointLights[{i}].quadratic", l.QuadraticFalloff);
-                    _shader.SetFloat($"pointLights[{i}].constant", l.Constant);
-                    _shader.SetFloat($"pointLights[{i}].intensity", l.Intensity);
-                    _shader.SetVector3($"pointLights[{i}].color",
-                        new Vector3(l.Color.R, l.Color.G, l.Color.B));
-                }
-                else
-                {
-                    Debug.LogError($"Hit the maximum {l.Type} light limit! Number of lights: {PointLightsInScene.Count}");
-                }
+                _shader.SetFloat($"pointLights[{i}].initialized", 1);
+                _shader.SetVector2($"pointLights[{i}].position", l.WorldPosition);
+                _shader.SetFloat($"pointLights[{i}].height", l.Height);
+                _shader.SetFloat($"pointLights[{i}].quadratic", l.QuadraticFalloff);
+                _shader.SetFloat($"pointLights[{i}].constant", l.Constant);
+                _shader.SetFloat($"pointLights[{i}].intensity", l.Intensity);
+                _shader.SetVector3($"pointLights[{i}].color",
+                    new Vector3(l.Color.R, l.Color.G, l.Color.B));
+            }
+
+            if (PointLightsInScene.Count > MAX_POINT_LIGHTS && !_loggedLimit)
+            {
+                _loggedLimit = true;
+                Debug.LogWarning($"Hit the maximum point light limit! Number of lights: {PointLightsInScene.Count}");
             }
 
             // Add spotlights

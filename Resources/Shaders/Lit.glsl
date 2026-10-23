@@ -55,7 +55,7 @@ uniform PointLight pointLights[MAX_POINT_LIGHTS];
 
 vec3 calcPointLight(PointLight light, vec2 fragPos, vec3 normal)
 {
-    if (isinf(light.initialized)) return vec3(0);
+    if (light.initialized < 0.5) return vec3(0);
     vec3 lightPos = vec3(light.position, light.height);
     vec3 pos = vec3(fragPos, 0);
     vec3 lightDir = normalize(lightPos - pos);

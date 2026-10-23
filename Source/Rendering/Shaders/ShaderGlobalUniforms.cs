@@ -22,9 +22,18 @@ namespace Atlas2D.Rendering
 
         public static void RegisterShader(Shader _shader)
         {
+            if (shaders.Contains(_shader)) return;
             shaders.Add(_shader);
 
             _shader.Use();
+            if (_shader.GlobalUniformTags == null) return;
+            foreach (string tag in _shader.GlobalUniformTags)
+            {
+                if (globalUniforms.TryGetValue(tag, out IGlobalUniform uniform))
+                {
+                    uniform.ApplyUniform(_shader);
+                }
+            }
         }
 
         public static void UnregisterShader(Shader _shader)
