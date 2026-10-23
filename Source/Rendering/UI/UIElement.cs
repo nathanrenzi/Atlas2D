@@ -495,6 +495,14 @@ namespace Atlas2D.UI
             if (Layout != null)
             {
                 desiredSize = Layout.Measure(this, availableSize);
+                Vector2 innerSize = new Vector2(
+                    Math.Max(0, availableSize.X - Padding.Left - Padding.Right),
+                    Math.Max(0, availableSize.Y - Padding.Top - Padding.Bottom)
+                );
+                foreach (var child in _children)
+                {
+                    if (child.Visible && child.IgnoreLayout) child.Measure(innerSize);
+                }
             }
             else
             {
@@ -592,6 +600,16 @@ namespace Atlas2D.UI
             if (Layout != null)
             {
                 Layout.Arrange(this, finalRect);
+                Vector2 innerSize = new Vector2(
+                    Math.Max(0, finalRect.Width - Padding.Left - Padding.Right),
+                    Math.Max(0, finalRect.Height - Padding.Top - Padding.Bottom)
+                );
+                foreach (var child in _children)
+                {
+                    if (!child.Visible || !child.IgnoreLayout) continue;
+                    child.Measure(innerSize);
+                    child.Arrange(new Rect(child.Position.X, child.Position.Y, child.DesiredSize.X, child.DesiredSize.Y));
+                }
             }
             else
             {

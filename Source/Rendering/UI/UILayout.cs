@@ -20,8 +20,18 @@ namespace Atlas2D.UI
             _registeredElements.Remove(element);
         }
 
-        internal abstract Vector2 Measure(UIElement parent, Vector2 availableSize);
-        internal abstract void Arrange(UIElement parent, Rect finalRect);
+        /// <summary>
+        /// Measures the children of <paramref name="parent"/> and returns the size the parent wants, including its padding.
+        /// Call Measure on each visible child. Skip children with IgnoreLayout set, the element measures those itself.
+        /// </summary>
+        protected internal abstract Vector2 Measure(UIElement parent, Vector2 availableSize);
+
+        /// <summary>
+        /// Positions the children of <paramref name="parent"/>. Call Arrange on each visible child with a rect relative to the
+        /// parent's top left corner. The parent's size is finalRect.Width and finalRect.Height, and its padding is not yet applied.
+        /// Skip children with IgnoreLayout set, the element arranges those itself.
+        /// </summary>
+        protected internal abstract void Arrange(UIElement parent, Rect finalRect);
 
         protected void InvalidateMeasure()
         {

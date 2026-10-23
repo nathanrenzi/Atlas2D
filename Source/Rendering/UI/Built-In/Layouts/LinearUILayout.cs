@@ -120,7 +120,7 @@ namespace Atlas2D.UI
         /// </summary>
         protected abstract Vector2 MakeVector(float main, float cross);
 
-        internal override Vector2 Measure(UIElement parent, Vector2 availableSize)
+        protected internal override Vector2 Measure(UIElement parent, Vector2 availableSize)
         {
             Vector2 innerSize = new Vector2(availableSize.X - parent.Padding.Left - parent.Padding.Right,
                 availableSize.Y - parent.Padding.Top - parent.Padding.Bottom);
@@ -132,13 +132,7 @@ namespace Atlas2D.UI
 
             foreach (var child in parent.Children)
             {
-                if (!child.Visible) continue;
-                if (child.IgnoreLayout)
-                {
-                    // Measure but don't contribute to size
-                    child.Measure(innerSize);
-                    continue;
-                }
+                if (!child.Visible || child.IgnoreLayout) continue;
 
                 float availableCross = CrossAxisAlignment == UILayoutAlignment.Stretch
                     ? GetCross(innerSize)
@@ -164,7 +158,7 @@ namespace Atlas2D.UI
                 parent.Padding.Top + parent.Padding.Bottom);
         }
 
-        internal override void Arrange(UIElement parent, Rect finalRect)
+        protected internal override void Arrange(UIElement parent, Rect finalRect)
         {
             Rect innerRect = new Rect(
                 parent.Padding.Left,
@@ -280,14 +274,6 @@ namespace Atlas2D.UI
                 child.Arrange(CalculateAnchoredRect(child, new Rect(childPos.X, childPos.Y, childSize.X, childSize.Y)));
 
                 currentMain += slotMain + spacing;
-            }
-
-            foreach (var child in parent.Children)
-            {
-                if (!child.Visible || !child.IgnoreLayout) continue;
-                child.Measure(new Vector2(innerRect.Width, innerRect.Height));
-                child.Arrange(new Rect(child.Position.X, child.Position.Y,
-                    child.DesiredSize.X, child.DesiredSize.Y));
             }
         }
 
