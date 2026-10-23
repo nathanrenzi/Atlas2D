@@ -42,6 +42,7 @@ namespace Atlas2D
         private bool _useClassesQueue = false;
         private BlendMode _currentBlendMode = BlendMode.Interpolative;
         private bool _isGraphicsInitialized = false;
+        private bool _hasCalledInitialize = false;
         private bool _hasExited = false;
         private bool _exitRequested = false;
 
@@ -175,6 +176,7 @@ namespace Atlas2D
                 IsBackground = true
             };
 
+            _hasCalledInitialize = true;
             Initialize();
             if (_exitRequested)
             {
@@ -283,6 +285,7 @@ namespace Atlas2D
 
                 // Input
                 Input.ProcessInput();
+                Display.Update();
                 // -----------------------
 
                 // Updating
@@ -444,7 +447,7 @@ namespace Atlas2D
             if (_hasExited) return;
             _hasExited = true;
 
-            ShutdownStep(OnGameClose);
+            if (_hasCalledInitialize) ShutdownStep(OnGameClose);
             List<IGameClass> classesCopy = new List<IGameClass>(_classes);
 
             // Network goes first, so disconnect events run while the rest of the game still exists
@@ -463,8 +466,11 @@ namespace Atlas2D
                     PhysicsThread.Join();
                 PhysicsCancellationToken.Dispose();
             });
-            ShutdownStep(Material.Shutdown);
-            ShutdownStep(GlobalShaders.Shutdown);
+            if (_isGraphicsInitialized)
+            {
+                ShutdownStep(Material.Shutdown);
+                ShutdownStep(GlobalShaders.Shutdown);
+            }
             ShutdownStep(AudioSystem.Shutdown);
             ShutdownStep(Resources.Shutdown);
             if (terminateGlfw)

@@ -1,6 +1,7 @@
 ﻿using Atlas2D.Management;
 using Atlas2D.Rendering;
 using Atlas2D.Rendering.Text;
+using Atlas2D.UI;
 using System.Text;
 
 namespace Atlas2D
@@ -10,7 +11,7 @@ namespace Atlas2D
         private static Dictionary<string, SharedResource<Texture2DArray>> textureArrayCache = new();
         private static Dictionary<string, SharedResource<Texture2D>> textureCache = new();
         private static Dictionary<uint, SharedResource<Texture2D>> textureHandleCache = new();
-        private static Dictionary<FontArgs, SharedResource<FontGlyphStore>> fontCache = new();
+        private static Dictionary<(FontArgs Args, float UIScale), SharedResource<FontGlyphStore>> fontCache = new();
         private static SharedResource<Texture2D> missingTexture;
 
         internal static void Shutdown()
@@ -132,25 +133,40 @@ namespace Atlas2D
         #endregion
 
         #region Fonts
+        /// <summary>
+        /// Gets a font rendered for the current UI scale.
+        /// </summary>
         public static SharedResource<FontGlyphStore> GetFont(string path, int fontSize, float fontScale, int outlineSize)
         {
             if (!ValidatePath(path)) return null;
 
-            string[] s = path.Split('/');
             FontArgs args = new FontArgs()
             {
-                FontFile = s[s.Length - 1],
+                FontFile = Path.GetFullPath(path),
                 FontSize = fontSize,
                 FontScale = fontScale,
                 OutlineWidth = outlineSize
             };
+            var key = (args, UICanvas.Instance.Scale);
 
-            if (!fontCache.TryGetValue(args, out var handle))
+            if (!fontCache.TryGetValue(key, out var handle))
             {
                 handle = SharedResource<FontGlyphStore>.Create(FontGlyphFactory.Load(path, fontSize, fontScale, outlineSize));
-                fontCache.Add(args, handle);
+                fontCache.Add(key, handle);
             }
             return handle.AddRef();
+        }
+
+        /// <summary>
+        /// Frees fonts that only the cache is still holding, such as ones rendered for an old UI scale.
+        /// </summary>
+        internal static void ReleaseUnusedFonts()
+        {
+            foreach (var entry in fontCache.Where(entry => entry.Value.RefCount == 1).ToList())
+            {
+                entry.Value.Release();
+                fontCache.Remove(entry.Key);
+            }
         }
         #endregion
     }

@@ -239,6 +239,7 @@ namespace Atlas2D.UI
             }
 
             OnUIScaleChanged?.Invoke(Scale);
+            Resources.ReleaseUnusedFonts();
         }
 
         /// <summary>

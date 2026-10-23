@@ -109,7 +109,9 @@ namespace Atlas2D.UI
         /// <summary>
         /// The glyph store used to render this text element's font.
         /// </summary>
-        public SharedResource<FontGlyphStore> FontGlyphStore { get; }
+        public SharedResource<FontGlyphStore> FontGlyphStore { get; private set; }
+
+        private readonly FontArgs _fontArguments;
 
         private float _totalSizeX = 0;
         private float _totalSizeY = 0;
@@ -124,8 +126,8 @@ namespace Atlas2D.UI
         public UIText(UITextStyle style, string text, UIRenderArgs? arguments = null)
             : base(arguments, true)
         {
-            FontGlyphStore = Resources.GetFont(style.FontArguments.FontFile,
-                style.FontArguments.FontSize, style.FontArguments.FontScale, 0);
+            _fontArguments = style.FontArguments;
+            FontGlyphStore = LoadFont();
 
             _text = text;
             HorizontalAlignment = style.HorizontalAlignment;
@@ -137,6 +139,26 @@ namespace Atlas2D.UI
                 style.CustomShader ?? GlobalShaders.Text, style.Color, FontGlyphStore.Value.Texture));
             Renderer.SetMaterial(mat);
             mat.Release();
+
+            UICanvas.Instance.OnUIScaleChanged += OnUIScaleChanged;
+        }
+
+        private SharedResource<FontGlyphStore> LoadFont() => Resources.GetFont(_fontArguments.FontFile,
+            _fontArguments.FontSize, _fontArguments.FontScale, 0);
+
+        private void OnUIScaleChanged(float scale)
+        {
+            SharedResource<FontGlyphStore> font = LoadFont();
+            if (font == null || font.Value == FontGlyphStore.Value)
+            {
+                font?.Release();
+                return;
+            }
+
+            Renderer.Material.Value.SetMainTexture(font.Value.Texture);
+            FontGlyphStore.Release();
+            FontGlyphStore = font;
+            InvalidateMeasure();
         }
 
         protected override Vector2 MeasureCore(Vector2 availableSize)
@@ -442,6 +464,7 @@ namespace Atlas2D.UI
 
         protected override void OnDispose()
         {
+            if (UICanvas.Instance != null) UICanvas.Instance.OnUIScaleChanged -= OnUIScaleChanged;
             FontGlyphStore.Release();
         }
     }

@@ -20,6 +20,8 @@ namespace Atlas2D
         private static PostProcessingStack _fxaaPostProcessing = new(-1);
         private static SizeCallback _windowResizeCallback;
         private static MonitorCallback _monitorCallback;
+        private static PositionCallback _windowPositionCallback;
+        private static bool _monitorChanged;
 
         public static void Initialize()
         {
@@ -95,7 +97,49 @@ namespace Atlas2D
             _monitorCallback = new MonitorCallback((monitor, connection) => NativeCallbackGuard.Run(AssignMonitorPointers));
             Glfw.SetMonitorCallback(_monitorCallback);
 
+            _windowPositionCallback = new PositionCallback((window, x, y) => NativeCallbackGuard.Run(UpdateCurrentMonitor));
+            Glfw.SetWindowPositionCallback(Window, _windowPositionCallback);
+
             _fxaaPostProcessing.Add(new FXAAPostProcess());
+        }
+
+        /// <summary>
+        /// Applies changes caused by the window moving to another monitor. Called once per frame.
+        /// </summary>
+        internal static void Update()
+        {
+            if (!_monitorChanged) return;
+            _monitorChanged = false;
+
+            WindowMode mode = Engine.Game.Settings.WindowMode;
+            if (mode == WindowMode.Fullscreen || mode == WindowMode.BorderlessWindow)
+                SetWindowMode(mode);
+            Debug.Log($"Window moved to monitor {Monitor.UserPointer}, size is now {WindowSize.X}x{WindowSize.Y}");
+        }
+
+        private static void UpdateCurrentMonitor()
+        {
+            Glfw.GetWindowPosition(Window, out int x, out int y);
+            Glfw.GetWindowSize(Window, out int width, out int height);
+            int centerX = x + width / 2;
+            int centerY = y + height / 2;
+
+            foreach (GLFW.Monitor monitor in Glfw.Monitors)
+            {
+                Glfw.GetMonitorPosition(monitor, out int monitorX, out int monitorY);
+                VideoMode video = Glfw.GetVideoMode(monitor);
+                bool containsCenter = centerX >= monitorX && centerX < monitorX + video.Width
+                    && centerY >= monitorY && centerY < monitorY + video.Height;
+                if (!containsCenter) continue;
+
+                if (monitor != Monitor)
+                {
+                    Monitor = monitor;
+                    Engine.Game.Settings.Monitor = monitor;
+                    _monitorChanged = true;
+                }
+                return;
+            }
         }
 
         private static void AssignMonitorPointers()
