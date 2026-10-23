@@ -15,13 +15,38 @@ namespace Atlas2D.Audio
             new Curve.Point(1, 0, Curve.Handle.Left, Curve.Handle.Right)
         });
 
-        public SpatialAudioNode(AudioInstance audioInstance)
+        /// <summary>
+        /// Whether the sound starts playing when the node is enabled while the sound is stopped.
+        /// </summary>
+        public bool PlayOnEnable { get; set; }
+
+        private bool _pausedByDisable;
+
+        public SpatialAudioNode(AudioInstance audioInstance, bool playOnEnable = true)
         {
             AudioInstance = audioInstance;
+            PlayOnEnable = playOnEnable;
         }
 
-        protected override void OnEnable() => AudioInstance.Unpause();
-        protected override void OnDisable() => AudioInstance.Pause();
+        protected override void OnEnable()
+        {
+            if (_pausedByDisable)
+            {
+                _pausedByDisable = false;
+                AudioInstance.Unpause();
+            }
+            else if (PlayOnEnable && AudioInstance.PlaybackState == PlaybackState.Stopped)
+            {
+                AudioInstance.Play();
+            }
+        }
+
+        protected override void OnDisable()
+        {
+            if (AudioInstance.PlaybackState != PlaybackState.Playing) return;
+            _pausedByDisable = true;
+            AudioInstance.Pause();
+        }
 
         protected override void OnUpdate()
         {
