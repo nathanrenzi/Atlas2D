@@ -17,7 +17,6 @@ out vec4 FragColor;
 
 in vec2 texCoord;
 
-uniform vec2 resolution;
 uniform float intensity;
 uniform vec4 clearColor;
 uniform sampler2D frameBufferTexture;
@@ -26,7 +25,7 @@ void main()
 {                 
     vec2 position = texCoord - vec2(0.5);        
     float distance = length(position);
-    float pixelIntensity = distance / 0.5f * -intensity * (resolution.x/1920);
+    float pixelIntensity = distance / 0.5 * -intensity;
 
     vec2 uv = position * (1 + pixelIntensity) + vec2(0.5);
     vec4 color = texture(frameBufferTexture, uv);

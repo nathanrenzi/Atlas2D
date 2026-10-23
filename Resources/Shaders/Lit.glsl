@@ -4,23 +4,19 @@ layout (location = 0) in vec2 aPosition;
 layout (location = 1) in vec2 aTexCoord;
 
 out vec2 texCoord;
-out vec4 texColor;
-out vec4 position;
-out mat4 nModel;
-    
-uniform vec4 mainColor;
+out vec2 worldPosition;
+out mat3 normalMatrix;
 
 uniform mat4 projection;
 uniform mat4 model;
 
-void main() 
+void main()
 {
     texCoord = aTexCoord;
-    texColor = mainColor;
-    gl_Position = projection * model * vec4(aPosition.xy, 0.0, 1.0);
-    nModel = model;
-
-    position = model * vec4(aPosition.xy, 0.0, 1.0);
+    vec4 world = model * vec4(aPosition.xy, 0.0, 1.0);
+    worldPosition = world.xy;
+    normalMatrix = mat3(transpose(inverse(model)));
+    gl_Position = projection * world;
 }
 
 #shader fragment
@@ -28,18 +24,16 @@ void main()
 out vec4 FragColor;
 
 in vec2 texCoord;
-in vec4 texColor;
-in vec4 position;
-in mat4 nModel;
+in vec2 worldPosition;
+in mat3 normalMatrix;
 
-// Global Uniforms
-uniform float time = 0.0;
+uniform vec4 mainColor;
 uniform vec4 ambientColor = vec4(0.0);
 uniform sampler2D mainTextureSampler;
 uniform sampler2D normalTextureSampler;
 uniform float normalScale = 1.0;
 
-struct PointLight {   
+struct PointLight {
     float initialized;
     vec2 position;
     float height;
@@ -47,53 +41,40 @@ struct PointLight {
     float constant;
     float intensity;
     vec3 color;
-};  
+};
 
-#define DISTANCE_REF 512
 #define MAX_POINT_LIGHTS 16
 uniform PointLight pointLights[MAX_POINT_LIGHTS];
 
 vec3 calcPointLight(PointLight light, vec2 fragPos, vec3 normal)
 {
     if (light.initialized < 0.5) return vec3(0);
-    vec3 lightPos = vec3(light.position, light.height);
-    vec3 pos = vec3(fragPos, 0);
-    vec3 lightDir = normalize(lightPos - pos);
-    float diff = max(dot(normal, lightDir), 0.0);
-    float distance = length(lightPos - pos);
+    vec3 toLight = vec3(light.position, light.height) - vec3(fragPos, 0.0);
+    float diff = max(dot(normal, normalize(toLight)), 0.0);
+    float distance = length(toLight);
     float attenuation = clamp(1.0 - distance * distance / (light.quadratic * light.quadratic), 0.0, 1.0);
     attenuation *= attenuation;
     return light.color * light.intensity * diff * attenuation;
-} 
+}
 
-void main() 
+void main()
 {
-    // Getting object color from texture
-    vec4 objectColor = texture(mainTextureSampler, texCoord) * texColor;
+    vec4 objectColor = texture(mainTextureSampler, texCoord) * mainColor;
     if (objectColor.a == 0.0)
     {
         FragColor = vec4(0);
         return;
     }
 
-    // Getting normal from texture
-    vec3 normal = vec3(texture(normalTextureSampler, texCoord));
-    normal = normalize((normal * 2.0) - 1.0);
+    vec3 normal = normalize(texture(normalTextureSampler, texCoord).rgb * 2.0 - 1.0);
+    normal = normalize(vec3(normal.xy * normalScale, normal.z));
+    normal = normalize(normalMatrix * normal);
 
-    // Transposing normal using model matrix
-    normal = normalize(vec3(normal.x * normalScale, normal.y * normalScale, normal.z));
-    vec3 normalTransposed = normalize(mat3(transpose(inverse(nModel))) * normal);
-
-    // Setting result to ambient color
-    vec3 result = vec3(ambientColor);
-
-    // Looping through light array to add lighting
-    for(int i = 0; i < MAX_POINT_LIGHTS; i++)
+    vec3 light = ambientColor.rgb;
+    for (int i = 0; i < MAX_POINT_LIGHTS; i++)
     {
-        result += calcPointLight(pointLights[i], position.xy, normalTransposed);
+        light += calcPointLight(pointLights[i], worldPosition, normal);
     }
 
-    // Multiplying the unlit object color with the light color
-    vec3 res = objectColor.rgb * result;
-    FragColor = vec4(res.rgb, objectColor.a);
+    FragColor = vec4(objectColor.rgb * light, objectColor.a);
 }

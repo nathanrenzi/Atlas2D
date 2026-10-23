@@ -85,11 +85,14 @@ vec4 applyTemperature(vec4 color)
 void main()
 {
     vec4 res = texture(frameBufferTexture, texCoord);
+    // Grading works in sRGB so brightness and contrast act around perceptual mid grey
+    res.rgb = pow(max(res.rgb, 0.0), vec3(1.0 / 2.2));
     res = applyBrightness(res);
     res = applyContrast(res);
     res = applySaturation(res);
     res = applyTemperature(res);
     res = applyHueShift(res);
+    res.rgb = pow(max(res.rgb, 0.0), vec3(2.2));
     res = applyColorFilter(res);
     FragColor = res;
 }

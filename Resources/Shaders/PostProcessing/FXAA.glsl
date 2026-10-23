@@ -28,12 +28,17 @@ uniform float Subpixel = 0.3;
 #define REDUCE_MIN (1.0/128.0)
 #define REDUCE_MUL (1.0/32.0)
 
+// The frame is in linear color, so luma is brought back to a perceptual scale for edge detection
+float luma(vec3 color)
+{
+    return sqrt(dot(color, vec3(0.299, 0.587, 0.114)));
+}
+
 void main()
 {
-    const vec3 lumaCoeff = vec3(0.299, 0.587, 0.114);
 
     vec3 rgbCC = texture(frameBufferTexture, texCoord).rgb;
-    float lumaCC = dot(rgbCC, lumaCoeff);
+    float lumaCC = luma(rgbCC);
 
     vec3 rgbNW = texture(frameBufferTexture, texCoord + vec2(-1.0, -1.0) * texel).rgb;
     vec3 rgbNE = texture(frameBufferTexture, texCoord + vec2( 1.0, -1.0) * texel).rgb;
@@ -45,14 +50,14 @@ void main()
     vec3 rgbW  = texture(frameBufferTexture, texCoord + vec2(-1.0, 0.0) * texel).rgb;
     vec3 rgbE  = texture(frameBufferTexture, texCoord + vec2( 1.0, 0.0) * texel).rgb;
 
-    float lumaNW = dot(rgbNW, lumaCoeff);
-    float lumaNE = dot(rgbNE, lumaCoeff);
-    float lumaSW = dot(rgbSW, lumaCoeff);
-    float lumaSE = dot(rgbSE, lumaCoeff);
-    float lumaN  = dot(rgbN,  lumaCoeff);
-    float lumaS  = dot(rgbS,  lumaCoeff);
-    float lumaW  = dot(rgbW,  lumaCoeff);
-    float lumaE  = dot(rgbE,  lumaCoeff);
+    float lumaNW = luma(rgbNW);
+    float lumaNE = luma(rgbNE);
+    float lumaSW = luma(rgbSW);
+    float lumaSE = luma(rgbSE);
+    float lumaN  = luma(rgbN);
+    float lumaS  = luma(rgbS);
+    float lumaW  = luma(rgbW);
+    float lumaE  = luma(rgbE);
 
     float lumaMin = min(lumaCC, min(min(lumaNW,lumaNE), min(min(lumaSW,lumaSE), min(min(lumaN,lumaS), min(lumaW,lumaE)))));
     float lumaMax = max(lumaCC, max(max(lumaNW,lumaNE), max(max(lumaSW,lumaSE), max(max(lumaN,lumaS), max(lumaW,lumaE)))));
@@ -82,6 +87,6 @@ void main()
         texture(frameBufferTexture, texCoord - dir * (0.5 * Subpixel)).rgb
     );
 
-    float lumaB = dot(rgbB, lumaCoeff);
+    float lumaB = luma(rgbB);
     FragColor = vec4((lumaB < lumaMin || lumaB > lumaMax) ? rgbA : rgbB, 1.0);
 }

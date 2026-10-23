@@ -21,6 +21,8 @@ uniform sampler2D frameBufferTexture;
 
 void main()
 {
-    vec4 res = texture(frameBufferTexture, texCoord);
-    FragColor = vec4(1 - res.r, 1 - res.g, 1 - res.b, 1.0f);
+    vec3 color = clamp(texture(frameBufferTexture, texCoord).rgb, 0.0, 1.0);
+    // Inverts in sRGB so mid grey stays mid grey, then converts back to linear
+    vec3 inverted = 1.0 - pow(color, vec3(1.0 / 2.2));
+    FragColor = vec4(pow(inverted, vec3(2.2)), 1.0);
 }

@@ -1,12 +1,9 @@
 #shader vertex
 #version 330 core
-layout(location = 0) in vec2 aPosition;
-layout(location = 1) in vec2 aTexCoord;
+layout (location = 0) in vec2 aPosition;
+layout (location = 1) in vec2 aTexCoord;
 
 out vec2 texCoord;
-out vec4 vertexColor;
-
-uniform vec4 mainColor;
 
 uniform mat4 projection;
 uniform mat4 uiMatrix;
@@ -15,7 +12,6 @@ uniform mat4 model;
 void main()
 {
     texCoord = aTexCoord;
-    vertexColor = mainColor;
     gl_Position = projection * uiMatrix * model * vec4(aPosition.xy, 0.0, 1.0);
 }
 
@@ -24,21 +20,24 @@ void main()
 out vec4 FragColor;
 
 in vec2 texCoord;
-in vec4 vertexColor;
 
-uniform float time = 0;
-uniform float startTime = 0;
+uniform vec4 mainColor;
+uniform float time = 0.0;
+uniform float startTime = 0.0;
 uniform sampler2D mainTextureSampler;
 
+const float PI = 3.14159265;
 const float CARET_BLINK_SPEED = 2.0;
 const float CARET_BLINK_SHARPNESS = 0.2;
 
 float getAlpha()
 {
-    return pow(sin(3.14159265 * ((time - startTime + 0.2) - floor(time - startTime)) * CARET_BLINK_SPEED), CARET_BLINK_SHARPNESS);
+    float wave = sin(PI * (time - startTime + 0.2) * CARET_BLINK_SPEED);
+    return pow(max(wave, 0.0), CARET_BLINK_SHARPNESS);
 }
 
 void main()
 {
-    FragColor = vec4((texture(mainTextureSampler, texCoord) * vertexColor).rgb, getAlpha());
+    vec4 color = texture(mainTextureSampler, texCoord) * mainColor;
+    FragColor = vec4(color.rgb, color.a * getAlpha());
 }

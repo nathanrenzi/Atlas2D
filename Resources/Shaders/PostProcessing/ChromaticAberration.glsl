@@ -17,7 +17,6 @@ out vec4 FragColor;
 
 in vec2 texCoord;
 
-uniform vec2 resolution;
 uniform float intensity;
 uniform float redOffset;
 uniform float greenOffset;
@@ -28,7 +27,7 @@ void main()
 {                 
     vec2 position = texCoord - vec2(0.5);        
     float distance = length(position);
-    float pixelIntensity = distance / 0.5f * intensity * (resolution.x/1920);
+    float pixelIntensity = distance / 0.5 * intensity;
 
     vec2 rUv = position * (1 + redOffset * pixelIntensity) + vec2(0.5);
     float r = texture(frameBufferTexture, rUv).r;
