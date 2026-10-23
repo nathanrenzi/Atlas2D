@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System.Globalization;
+using System.Numerics;
 using System.Text;
 
 namespace Atlas2D
@@ -42,8 +43,8 @@ namespace Atlas2D
 
         public static bool Verify(string filePath)
         {
-            return File.Exists(filePath) && 
-                Base64Decode(File.ReadAllText(filePath)).Substring(0, 5).Contains("Save:");
+            return File.Exists(filePath) &&
+                Base64Decode(File.ReadAllText(filePath)).StartsWith("Save:");
         }
 
         public bool Remove(string key)
@@ -66,7 +67,8 @@ namespace Atlas2D
             Dictionary<string, string> keyValuePairs = new Dictionary<string, string>();
             try
             {
-                string data = Base64Decode(File.ReadAllText(FilePath)).Replace("Save:", "");
+                string data = Base64Decode(File.ReadAllText(FilePath));
+                if (data.StartsWith("Save:")) data = data.Substring(5);
                 string[] parts = data.Split('>');
                 if (parts.Length < 2)
                 {
@@ -120,27 +122,30 @@ namespace Atlas2D
                     builder.Append(">");
                 }
             }
-            File.WriteAllText(FilePath, Base64Encode(builder.ToString()));
+            // Written to a temp file first, so a crash mid-write can't leave a half-written save
+            string tempPath = FilePath + ".tmp";
+            File.WriteAllText(tempPath, Base64Encode(builder.ToString()));
+            File.Move(tempPath, FilePath, true);
         }
 
         public void SaveFloat(string key, float value)
         {
-            Write(key, $"f:{value}");
+            Write(key, $"f:{FormatFloat(value)}");
         }
 
         public void SaveInt(string key, int value)
         {
-            Write(key, $"i:{value}");
+            Write(key, $"i:{value.ToString(CultureInfo.InvariantCulture)}");
         }
 
         public void SaveString(string key, string value)
         {
-            Write(key, $"s:{value}");
+            Write(key, $"s:{Escape(value)}");
         }
 
         public void SaveVector2(string key, Vector2 value)
         {
-            Write(key, $"v:({value.X},{value.Y})");
+            Write(key, $"v:{FormatVector(value)}");
         }
 
         public void SaveBool(string key, bool value)
@@ -171,46 +176,60 @@ namespace Atlas2D
             builder.Append(":f:");
             if (data.Floats.Count > 0)
             {
-                AppendArray(data.Floats, builder);
+                builder.AppendJoin(',', data.Floats.Select(FormatFloat));
             }
             builder.Append(":i:");
             if (data.Ints.Count > 0)
             {
-                AppendArray(data.Ints, builder);
+                builder.AppendJoin(',', data.Ints.Select(i => i.ToString(CultureInfo.InvariantCulture)));
             }
             builder.Append(":s:");
             if (data.Strings.Count > 0)
             {
-                AppendArray(data.Strings, builder);
+                builder.AppendJoin(',', data.Strings.Select(Escape));
             }
             builder.Append(":v:");
             if (data.Vectors.Count > 0)
             {
-                AppendArray(data.Vectors, builder);
+                builder.AppendJoin(',', data.Vectors.Select(FormatVector));
             }
             builder.Append(":t:");
             if (data.Bools.Count > 0)
             {
-                AppendArray(data.Bools, builder);
+                builder.AppendJoin(',', data.Bools.Select(b => b.ToString()));
             }
             builder.Append(":b:");
             if (data.Bytes.Count > 0)
             {
-                AppendArray(data.Bytes, builder);
+                builder.AppendJoin(',', data.Bytes.Select(b => b.ToString(CultureInfo.InvariantCulture)));
             }
             Write(key, builder.ToString());
         }
 
-        private void AppendArray<T>(List<T> list, StringBuilder builder)
+        // Numbers are always saved with '.' decimals, whatever the PC's language
+        private static string FormatFloat(float value) => value.ToString(CultureInfo.InvariantCulture);
+
+        private static float ParseFloat(string text)
         {
-            for (int i = 0; i < list.Count; i++)
-            {
-                builder.Append(list[i].ToString());
-                if (i + 1 < list.Count)
-                {
-                    builder.Append(',');
-                }
-            }
+            text = text.Trim();
+            if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)) return value;
+            // Saves from before this fix used the PC's language, like "1,5" in German
+            return float.Parse(text, NumberStyles.Float, CultureInfo.CurrentCulture);
+        }
+
+        private static string FormatVector(Vector2 value) => $"({FormatFloat(value.X)},{FormatFloat(value.Y)})";
+
+        // Strings can't contain the characters the file format uses to split values, so those are escaped
+        private static string Escape(string value)
+        {
+            if (value.Length == 0) return "%00";
+            return value.Replace("%", "%25").Replace(",", "%2C").Replace(">", "%3E").Replace(":", "%3A");
+        }
+
+        private static string Unescape(string value)
+        {
+            if (value == "%00") return "";
+            return value.Replace("%3A", ":").Replace("%3E", ">").Replace("%2C", ",").Replace("%25", "%");
         }
 
         public float? GetFloat(string key)
@@ -223,7 +242,7 @@ namespace Atlas2D
                 {
                     try
                     {
-                        return float.Parse(parts[1]);
+                        return ParseFloat(parts[1]);
                     }
                     catch
                     {
@@ -253,7 +272,7 @@ namespace Atlas2D
                 {
                     try
                     {
-                        return int.Parse(parts[1]);
+                        return int.Parse(parts[1], CultureInfo.InvariantCulture);
                     }
                     catch
                     {
@@ -283,7 +302,7 @@ namespace Atlas2D
                 {
                     try
                     {
-                        return parts[1];
+                        return Unescape(parts[1]);
                     }
                     catch
                     {
@@ -314,8 +333,8 @@ namespace Atlas2D
                     try
                     {
                         string[] values = parts[1].Split(",", 2);
-                        return new Vector2(float.Parse(values[0].Trim('(')),
-                                            float.Parse(values[1].Trim(')')));
+                        return new Vector2(ParseFloat(values[0].Trim('(')),
+                                            ParseFloat(values[1].Trim(')')));
                     }
                     catch
                     {
@@ -379,7 +398,7 @@ namespace Atlas2D
                         byte[] bytes = new byte[byteStrings.Length];
                         for(int i = 0; i < byteStrings.Length; i++)
                         {
-                            bytes[i] = byte.Parse(byteStrings[i]);
+                            bytes[i] = byte.Parse(byteStrings[i], CultureInfo.InvariantCulture);
                         }
                         return bytes;
                     }
@@ -424,24 +443,25 @@ namespace Atlas2D
                                     switch (i)
                                     {
                                         case 0:
-                                            data.Floats.Add(float.Parse(elementStrings[x]));
+                                            data.Floats.Add(ParseFloat(elementStrings[x]));
                                             break;
                                         case 1:
-                                            data.Ints.Add(int.Parse(elementStrings[x]));
+                                            data.Ints.Add(int.Parse(elementStrings[x], CultureInfo.InvariantCulture));
                                             break;
                                         case 2:
-                                            data.Strings.Add(elementStrings[x]);
+                                            data.Strings.Add(Unescape(elementStrings[x]));
                                             break;
                                         case 3:
-                                            data.Vectors.Add(new Vector2(float.Parse(elementStrings[x].Trim('(')),
-                                                float.Parse(elementStrings[x + 1].Trim(')'))));
+                                            // Also reads the old "<x, y>" format, which was saved as "<x, y-"
+                                            data.Vectors.Add(new Vector2(ParseFloat(elementStrings[x].TrimStart('(', '<', ' ')),
+                                                ParseFloat(elementStrings[x + 1].TrimEnd(')', '>', '-', ' '))));
                                             x++;
                                             break;
                                         case 4:
                                             data.Bools.Add(bool.Parse(elementStrings[x]));
                                             break;
                                         case 5:
-                                            data.Bytes.Add(byte.Parse(elementStrings[x]));
+                                            data.Bytes.Add(byte.Parse(elementStrings[x], CultureInfo.InvariantCulture));
                                             break;
                                     }
                                 }
