@@ -123,7 +123,14 @@ namespace Atlas2D
             }
 
             Settings s = new Settings(settingsJson);
-            s.Save();
+            try
+            {
+                s.Save();
+            }
+            catch (IOException e)
+            {
+                Debug.LogWarning($"Could not save {FilePath}: {e.Message}");
+            }
             return s;
         }
 
@@ -132,7 +139,7 @@ namespace Atlas2D
             SettingsJson settingsJson = new SettingsJson((int)Monitor.UserPointer, WindowWidth, WindowHeight, WindowMode,
                 Vsync, AntialiasingMode, RefreshRate, AudioMasterVolume);
             string json = JsonConvert.SerializeObject(settingsJson, Formatting.Indented);
-            string tempPath = FilePath + ".tmp";
+            string tempPath = $"{FilePath}.{Guid.NewGuid():N}.tmp";
             File.WriteAllText(tempPath, json);
             File.Move(tempPath, FilePath, true);
         }

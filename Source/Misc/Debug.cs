@@ -110,8 +110,17 @@ namespace Atlas2D
             {
                 Directory.CreateDirectory("Logs");
             }
-            LogFilePath = Path.GetFullPath("Logs/latest.txt");
-            _logFile = new StreamWriter(File.Create(LogFilePath)) { AutoFlush = true };
+            // Another running copy of the game keeps its log open, so later copies use the next free name
+            for (int i = 1; _logFile == null; i++)
+            {
+                string path = Path.GetFullPath(i == 1 ? "Logs/latest.txt" : $"Logs/latest ({i}).txt");
+                try
+                {
+                    _logFile = new StreamWriter(new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
+                    LogFilePath = path;
+                }
+                catch (IOException) when (i < 10) { }
+            }
         }
 
         public static void CloseLogFile()
