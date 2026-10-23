@@ -74,26 +74,33 @@ namespace Atlas2D.Networking.Core
                         break;
                     }
 
-                    switch (data.Item1)
+                    try
                     {
-                        case BuiltInMessageType.NetworkNodeSpawned:
-                            HandleNetworkNodeSpawned((NetworkNodeData)data.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeUpdated:
-                            HandleNetworkNodeUpdated((NetworkNodeUpdatedData)data.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeDespawned:
-                            HandleNetworkNodeDespawned((string)data.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeSync:
-                            if(_isSyncing)
-                                HandleNetworkNodeSyncSpawn((NetworkNodeSyncSpawnData)data.Item2);
-                            else
-                                HandleNetworkNodeSyncStart((int)data.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeRequestSyncData:
-                            HandleNetworkNodeRequestSyncData((ushort)data.Item2);
-                            break;
+                        switch (data.Item1)
+                        {
+                            case BuiltInMessageType.NetworkNodeSpawned:
+                                HandleNetworkNodeSpawned((NetworkNodeData)data.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeUpdated:
+                                HandleNetworkNodeUpdated((NetworkNodeUpdatedData)data.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeDespawned:
+                                HandleNetworkNodeDespawned((string)data.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeSync:
+                                if(_isSyncing)
+                                    HandleNetworkNodeSyncSpawn((NetworkNodeSyncSpawnData)data.Item2);
+                                else
+                                    HandleNetworkNodeSyncStart((int)data.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeRequestSyncData:
+                                HandleNetworkNodeRequestSyncData((ushort)data.Item2);
+                                break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"(CLIENT): Failed to handle {data.Item1}. {e}");
                     }
                 }
             }
@@ -186,79 +193,129 @@ namespace Atlas2D.Networking.Core
             BuiltInMessageType messageType = (BuiltInMessageType)e.MessageId;
             Message message = e.Message;
             object data = null;
-            switch (messageType)
+            try
             {
-                case BuiltInMessageType.NetworkNodeSpawned:
-                    data = new NetworkNodeData()
-                    {
-                        Version = message.GetUInt(),
-                        RegisterID = message.GetInt(),
-                        NetworkID = message.GetString(),
-                        OwnerID = message.GetUShort(),
-                        Json = message.GetString()
-                    };
-                    break;
-                case BuiltInMessageType.NetworkNodeUpdated:
-                    data = new NetworkNodeUpdatedData()
-                    {
-                        NetworkID = message.GetString(),
-                        Version = message.GetUInt(),
-                        Type = message.GetUShort(),
-                        Json = message.GetString()
-                    };
-                    break;
-                case BuiltInMessageType.NetworkNodeDespawned:
-                    data = message.GetString();
-                    break;
-                case BuiltInMessageType.NetworkNodeSync:
-                    if (_isSyncing)
-                    {
-                        data = new NetworkNodeSyncSpawnData()
+                switch (messageType)
+                {
+                    case BuiltInMessageType.NetworkNodeSpawned:
+                        data = new NetworkNodeData()
                         {
                             Version = message.GetUInt(),
                             RegisterID = message.GetInt(),
                             NetworkID = message.GetString(),
-                            ClientID = message.GetUShort(),
+                            OwnerID = message.GetUShort(),
                             Json = message.GetString()
                         };
-                    }
-                    else
-                    {
-                        data = message.GetInt();
-                    }
-                    break;
-                case BuiltInMessageType.NetworkNodeRequestSyncData:
-                    data = message.GetUShort();
-                    break;
+                        break;
+                    case BuiltInMessageType.NetworkNodeUpdated:
+                        data = new NetworkNodeUpdatedData()
+                        {
+                            NetworkID = message.GetString(),
+                            Version = message.GetUInt(),
+                            Type = message.GetUShort(),
+                            Json = message.GetString()
+                        };
+                        break;
+                    case BuiltInMessageType.NetworkNodeDespawned:
+                        data = message.GetString();
+                        break;
+                    case BuiltInMessageType.NetworkNodeSync:
+                        if (_isSyncing)
+                        {
+                            data = new NetworkNodeSyncSpawnData()
+                            {
+                                Version = message.GetUInt(),
+                                RegisterID = message.GetInt(),
+                                NetworkID = message.GetString(),
+                                ClientID = message.GetUShort(),
+                                Json = message.GetString()
+                            };
+                        }
+                        else
+                        {
+                            data = message.GetInt();
+                        }
+                        break;
+                    case BuiltInMessageType.NetworkNodeRequestSyncData:
+                        data = message.GetUShort();
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"(CLIENT): Could not read {messageType}. {exception}");
+                return;
             }
             _messageQueue.Enqueue((messageType, data));
         }
 
         private void HandleNetworkNodeRequestSyncData(ushort client)
         {
-            _isPaused = true;
             if (client == ID) return;
-            Message returnMessage = Message.Create(MessageSendMode.Reliable,
-                (ushort)BuiltInMessageType.NetworkNodeRequestSyncData);
-            returnMessage.AddUShort(client);
-            int initializedCount = 0;
-            foreach (var node in NetworkNodes.Values)
-            {
-                if (node.IsNetworkInitialized) initializedCount++;
-            }
-            returnMessage.AddInt(initializedCount);
+
+            // Gets every node's JSON first, so the count sent matches the messages that follow
+            List<(NetworkNode Node, string Json)> nodes = new();
             foreach (var node in NetworkNodes.Values)
             {
                 if (!node.IsNetworkInitialized) continue;
-                returnMessage.AddUInt(node.UpdateVersion);
-                returnMessage.AddInt(node.GetRegisterID());
-                returnMessage.AddString(node.NetworkID);
-                returnMessage.AddUShort(node.OwnerID);
-                returnMessage.AddString(node.ToJson());
+                string json = node.ToJson();
+                if (System.Text.Encoding.UTF8.GetByteCount(json) > Network.MAX_NODE_JSON_BYTES)
+                {
+                    Debug.LogError($"(CLIENT): NetworkNode [{node.NetworkID}] JSON is larger than {Network.MAX_NODE_JSON_BYTES} bytes and can't be synced.");
+                    continue;
+                }
+                nodes.Add((node, json));
             }
-            Debug.Log($"(CLIENT): Sending requested sync data to server, total count {initializedCount}.");
-            Send(returnMessage);
-            _isPaused = false;
+
+            Debug.Log($"(CLIENT): Sending requested sync data to server, total count {nodes.Count}.");
+            if (nodes.Count == 0)
+            {
+                Message emptyMessage = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeRequestSyncData);
+                emptyMessage.AddUShort(client);
+                emptyMessage.AddInt(0);
+                Send(emptyMessage);
+                return;
+            }
+
+            foreach (var (node, json) in nodes)
+            {
+                Message message = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeRequestSyncData);
+                message.AddUShort(client);
+                message.AddInt(nodes.Count);
+                message.AddUInt(node.UpdateVersion);
+                message.AddInt(node.GetRegisterID());
+                message.AddString(node.NetworkID);
+                message.AddUShort(node.OwnerID);
+                message.AddString(json);
+                Send(message);
+            }
+        }
+
+        /// <summary>
+        /// Creates a remote NetworkNode from spawn data. Returns null if the data is invalid.
+        /// </summary>
+        private NetworkNode CreateRemoteNode(int registerID, string networkID, string json)
+        {
+            if (registerID < 0 || registerID >= Network.NetworkNodeRegister.Count)
+            {
+                Debug.LogError($"(CLIENT): Unknown register ID {registerID} for NetworkNode [{networkID}]. Are both builds the same?");
+                return null;
+            }
+            if (string.IsNullOrEmpty(networkID) || NetworkNodes.ContainsKey(networkID))
+            {
+                Debug.LogError($"(CLIENT): NetworkNode [{networkID}] already exists or has no ID. Skipping.");
+                return null;
+            }
+
+            try
+            {
+                return Network.NetworkNodeRegister[registerID](json);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"(CLIENT): Could not create NetworkNode [{networkID}] from its JSON. {e}");
+                return null;
+            }
         }
 
         private void HandleNetworkNodeSpawned(NetworkNodeData data)
@@ -275,7 +332,8 @@ namespace Atlas2D.Networking.Core
             }
             else
             {
-                NetworkNode node = Network.NetworkNodeRegister[data.RegisterID](data.Json);
+                NetworkNode node = CreateRemoteNode(data.RegisterID, data.NetworkID, data.Json);
+                if (node == null) return;
                 node.SetUpdateVersion(data.Version);
                 NetworkNodes.Add(data.NetworkID, node);
                 node.NetworkInitialize(data.NetworkID, data.OwnerID, this, _server);
@@ -305,6 +363,35 @@ namespace Atlas2D.Networking.Core
 
         private void HandleNetworkNodeSyncSpawn(NetworkNodeSyncSpawnData data)
         {
+            // Counted even when the entry is invalid, so syncing still finishes
+            try
+            {
+                AddSyncedNode(data);
+            }
+            finally
+            {
+                _syncCount--;
+            }
+
+            Debug.Log($"(CLIENT): Received sync data from server, {_syncCount} left.");
+            if (_syncCount <= 0)
+            {
+                _isSyncing = false;
+                while (_syncingNetworkNodes.Count != 0)
+                {
+                    (NetworkNode, string, ushort) nodeData = _syncingNetworkNodes.Dequeue();
+                    nodeData.Item1.NetworkInitialize(nodeData.Item2, nodeData.Item3, this, _server);
+                    // Nodes from other clients start disabled, like in a normal spawn
+                    if (nodeData.Item3 != ID) nodeData.Item1.Enable();
+                    NetworkNodeSpawned?.Invoke(nodeData.Item2);
+                }
+                NetworkNodesLoaded?.Invoke();
+                Debug.Log("(CLIENT): Done syncing!");
+            }
+        }
+
+        private void AddSyncedNode(NetworkNodeSyncSpawnData data)
+        {
             if (data.ClientID == ID)
             {
                 if (!NetworkNodes.ContainsKey(data.NetworkID))
@@ -317,31 +404,18 @@ namespace Atlas2D.Networking.Core
             }
             else
             {
-                NetworkNode node = Network.NetworkNodeRegister[data.RegisterID](data.Json);
+                NetworkNode node = CreateRemoteNode(data.RegisterID, data.NetworkID, data.Json);
+                if (node == null) return;
                 node.SetUpdateVersion(data.Version);
                 NetworkNodes.Add(data.NetworkID, node);
                 _syncingNetworkNodes.Enqueue((node, data.NetworkID, data.ClientID));
-            }
-            _syncCount--;
-            Debug.Log($"(CLIENT): Received sync data from server, {_syncCount} left.");
-            if (_syncCount == 0)
-            {
-                _isSyncing = false;
-                while (_syncingNetworkNodes.Count != 0)
-                {
-                    (NetworkNode, string, ushort) nodeData = _syncingNetworkNodes.Dequeue();
-                    nodeData.Item1.NetworkInitialize(nodeData.Item2, nodeData.Item3, this, _server);
-                    NetworkNodeSpawned?.Invoke(nodeData.Item2);
-                }
-                NetworkNodesLoaded?.Invoke();
-                Debug.Log("(CLIENT): Done syncing!");
             }
         }
 
         private void HandleNetworkNodeSyncStart(int syncCount)
         {
             _syncCount = syncCount;
-            if (syncCount == 0)
+            if (syncCount <= 0)
             {
                 NetworkNodesLoaded?.Invoke();
                 Debug.Log("(CLIENT): Received sync signal from server with no data to sync, done syncing!");

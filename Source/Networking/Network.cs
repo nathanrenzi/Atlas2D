@@ -30,6 +30,16 @@ namespace Atlas2D.Networking
         public const ushort MIN_MESSAGE_TYPE_INTERCEPT = 60000;
         public const ushort MAX_MESSAGE_TYPE_INTERCEPT = 60004;
 
+        /// <summary>
+        /// The largest JSON (in UTF-8 bytes) a <see cref="NetworkNode"/> can spawn, sync or send with.
+        /// A Riptide message holds about 1225 bytes, and the rest of the message needs room too.
+        /// </summary>
+        public const int MAX_NODE_JSON_BYTES = 1000;
+        /// <summary>
+        /// The longest NetworkID a <see cref="NetworkNode"/> can have.
+        /// </summary>
+        public const int MAX_NETWORK_ID_LENGTH = 64;
+
         private bool _initialized = false;
 
         /// <summary>

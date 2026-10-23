@@ -31,6 +31,7 @@ namespace Atlas2D.Networking
     internal struct NetworkGameClassRequestSyncData
     {
         public ushort ToClient;
+        public int TotalCount;
         public NetworkNodeData[] GameClasses;
     }
 }

@@ -94,6 +94,12 @@ namespace Atlas2D.Networking
             if (string.IsNullOrEmpty(networkID))
                 networkID = Guid.NewGuid().ToString("N");
 
+            if (networkID.Length > Network.MAX_NETWORK_ID_LENGTH)
+            {
+                Debug.LogError($"NetworkNode ID [{networkID}] is longer than {Network.MAX_NETWORK_ID_LENGTH} characters. Cannot spawn.");
+                return;
+            }
+
             RemoveLocallyOnDespawn = removeLocallyOnDespawn;
 
             if (HostOnly && !Network.Instance.Server.IsRunning)
@@ -113,6 +119,13 @@ namespace Atlas2D.Networking
                 return;
             }
 
+            string json = ToJson();
+            if (System.Text.Encoding.UTF8.GetByteCount(json) > Network.MAX_NODE_JSON_BYTES)
+            {
+                Debug.LogError($"{GetType().Name} spawn JSON is larger than {Network.MAX_NODE_JSON_BYTES} bytes. Cannot spawn.");
+                return;
+            }
+
             OwnerID = _client.ID;
             IsOwner = true;
             NetworkID = networkID;
@@ -123,7 +136,7 @@ namespace Atlas2D.Networking
             message.AddUInt(UpdateVersion);
             message.AddInt(GetRegisterID());
             message.AddString(networkID);
-            message.AddString(ToJson());
+            message.AddString(json);
             _client.Send(message);
         }
 
@@ -176,6 +189,11 @@ namespace Atlas2D.Networking
             if (!IsNetworkInitialized)
             {
                 Debug.LogWarning("Trying to send a message from a NetworkNode that has not been initialized yet.");
+                return;
+            }
+            if (System.Text.Encoding.UTF8.GetByteCount(json) > Network.MAX_NODE_JSON_BYTES)
+            {
+                Debug.LogError($"{GetType().Name} update JSON is larger than {Network.MAX_NODE_JSON_BYTES} bytes. Cannot send.");
                 return;
             }
             UpdateVersion++;

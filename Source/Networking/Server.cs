@@ -14,6 +14,10 @@ namespace Atlas2D.Networking.Core
         public long TimeStarted { get; private set; } = -1;
         public bool IsRunning => RiptideServer.IsRunning;
         public bool AllowNonHostOwnership { get; set; } = true;
+        /// <summary>
+        /// How many NetworkNodes each client can spawn per second. Spawns over this are rejected.
+        /// </summary>
+        public int MaxSpawnsPerSecond { get; set; } = 60;
 
         public event Action<ushort> ClientConnected;
         public event Action<ushort> ClientDisconnected;
@@ -21,6 +25,9 @@ namespace Atlas2D.Networking.Core
         private List<Func<Connection, ValidationResult>> _connectionValidators = new();
         private Queue<(BuiltInMessageType, object, ushort)> _messageQueue = new();
         private Dictionary<uint, List<NetworkNodeData>> _syncingClientSnapshots = new();
+        // Sync data from the host for a joining client, collected one node per message until all have arrived
+        private Dictionary<ushort, (int Expected, List<NetworkNodeData> Nodes)> _pendingSnapshots = new();
+        private Dictionary<ushort, (int Count, long WindowStart)> _spawnCounts = new();
         private Dictionary<string, ushort> _networkGameClassOwners = new();
         private List<string> _networkNodesToRemove = new();
         private List<(string, ushort)> _networkNodesToAdd = new();
@@ -60,23 +67,30 @@ namespace Atlas2D.Networking.Core
                 (BuiltInMessageType, object, ushort) message;
                 if(_messageQueue.TryDequeue(out message))
                 {
-                    switch (message.Item1)
+                    try
                     {
-                        case BuiltInMessageType.NetworkNodeSpawned:
-                            HandleNetworkClassSpawned(message.Item3, (NetworkNodeData)message.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeUpdated:
-                            HandleNetworkClassUpdated(message.Item3, (NetworkNodeUpdatedData)message.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeDespawned:
-                            HandleNetworkClassDespawned(message.Item3, (string)message.Item2);
-                            break;
-                        case BuiltInMessageType.NetworkNodeSync:
-                            HandleNetworkClassSync(message.Item3);
-                            break;
-                        case BuiltInMessageType.NetworkNodeRequestSyncData:
-                            HandleNetworkClassRequestSync(message.Item3, (NetworkGameClassRequestSyncData)message.Item2);
-                            break;
+                        switch (message.Item1)
+                        {
+                            case BuiltInMessageType.NetworkNodeSpawned:
+                                HandleNetworkClassSpawned(message.Item3, (NetworkNodeData)message.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeUpdated:
+                                HandleNetworkClassUpdated(message.Item3, (NetworkNodeUpdatedData)message.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeDespawned:
+                                HandleNetworkClassDespawned(message.Item3, (string)message.Item2);
+                                break;
+                            case BuiltInMessageType.NetworkNodeSync:
+                                HandleNetworkClassSync(message.Item3);
+                                break;
+                            case BuiltInMessageType.NetworkNodeRequestSyncData:
+                                HandleNetworkClassRequestSync(message.Item3, (NetworkGameClassRequestSyncData)message.Item2);
+                                break;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"(SERVER): Failed to handle {message.Item1} from client [{message.Item3}]. {e}");
                     }
                 }
             }
@@ -158,6 +172,8 @@ namespace Atlas2D.Networking.Core
             if (!IsRunning) return;
             RiptideServer.Stop();
             _syncingClientSnapshots.Clear();
+            _pendingSnapshots.Clear();
+            _spawnCounts.Clear();
             _networkGameClassOwners.Clear();
             _serverPassword = "";
             _hostAssigned = false;
@@ -177,54 +193,95 @@ namespace Atlas2D.Networking.Core
             Message message = e.Message;
             ushort fromClient = e.FromConnection.Id;
             object data = null;
-            switch (messageType)
+            try
             {
-                case BuiltInMessageType.NetworkNodeSpawned:
-                    data = new NetworkNodeData()
-                    {
-                        Version = message.GetUInt(),
-                        RegisterID = message.GetInt(),
-                        NetworkID = message.GetString(),
-                        OwnerID = fromClient,
-                        Json = message.GetString()
-                    };
-                    break;
-                case BuiltInMessageType.NetworkNodeUpdated:
-                    data = new NetworkNodeUpdatedData()
-                    {
-                        MessageSendMode = (MessageSendMode)message.GetByte(),
-                        NetworkID = message.GetString(),
-                        Version = message.GetUInt(),
-                        Type = message.GetUShort(),
-                        Json = message.GetString()
-                    };
-                    break;
-                case BuiltInMessageType.NetworkNodeDespawned:
-                    data = message.GetString();
-                    break;
-                case BuiltInMessageType.NetworkNodeSync:
-                    data = null;
-                    break;
-                case BuiltInMessageType.NetworkNodeRequestSyncData:
-                    ushort toClient = message.GetUShort();
-                    int classCount = message.GetInt();
-                    NetworkNodeData[] classData = new NetworkNodeData[classCount];
-                    for (int i = 0; i < classCount; i++)
-                    {
-                        classData[i].Version = message.GetUInt();
-                        classData[i].RegisterID = message.GetInt();
-                        classData[i].NetworkID = message.GetString();
-                        classData[i].OwnerID = message.GetUShort();
-                        classData[i].Json = message.GetString();
-                    }
-                    data = new NetworkGameClassRequestSyncData()
-                    {
-                        ToClient = toClient,
-                        GameClasses = classData
-                    };
-                    break;
+                switch (messageType)
+                {
+                    case BuiltInMessageType.NetworkNodeSpawned:
+                        data = new NetworkNodeData()
+                        {
+                            Version = message.GetUInt(),
+                            RegisterID = message.GetInt(),
+                            NetworkID = message.GetString(),
+                            OwnerID = fromClient,
+                            Json = message.GetString()
+                        };
+                        break;
+                    case BuiltInMessageType.NetworkNodeUpdated:
+                        data = new NetworkNodeUpdatedData()
+                        {
+                            MessageSendMode = (MessageSendMode)message.GetByte(),
+                            NetworkID = message.GetString(),
+                            Version = message.GetUInt(),
+                            Type = message.GetUShort(),
+                            Json = message.GetString()
+                        };
+                        break;
+                    case BuiltInMessageType.NetworkNodeDespawned:
+                        data = message.GetString();
+                        break;
+                    case BuiltInMessageType.NetworkNodeSync:
+                        data = null;
+                        break;
+                    case BuiltInMessageType.NetworkNodeRequestSyncData:
+                        if (fromClient != _hostID)
+                        {
+                            Debug.LogError($"(SERVER): Non-host client [{fromClient}] tried to send client sync data to the server.");
+                            return;
+                        }
+                        ushort toClient = message.GetUShort();
+                        int totalCount = message.GetInt();
+                        NetworkNodeData[] classData = Array.Empty<NetworkNodeData>();
+                        if (totalCount > 0)
+                        {
+                            classData = new NetworkNodeData[1];
+                            classData[0].Version = message.GetUInt();
+                            classData[0].RegisterID = message.GetInt();
+                            classData[0].NetworkID = message.GetString();
+                            classData[0].OwnerID = message.GetUShort();
+                            classData[0].Json = message.GetString();
+                        }
+                        data = new NetworkGameClassRequestSyncData()
+                        {
+                            ToClient = toClient,
+                            TotalCount = totalCount,
+                            GameClasses = classData
+                        };
+                        break;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError($"(SERVER): Could not read {messageType} from client [{fromClient}]. {exception}");
+                return;
             }
             _messageQueue.Enqueue((messageType, data, fromClient));
+        }
+
+        /// <summary>
+        /// Returns why a spawn from a client is invalid, or null if it's fine.
+        /// </summary>
+        private string ValidateSpawn(ushort client, NetworkNodeData data)
+        {
+            if (data.RegisterID < 0 || data.RegisterID >= Network.NetworkNodeRegister.Count)
+                return $"unknown register ID {data.RegisterID}";
+            if (string.IsNullOrEmpty(data.NetworkID) || data.NetworkID.Length > Network.MAX_NETWORK_ID_LENGTH)
+                return "invalid NetworkID";
+            if (data.Json == null || System.Text.Encoding.UTF8.GetByteCount(data.Json) > Network.MAX_NODE_JSON_BYTES)
+                return $"JSON larger than {Network.MAX_NODE_JSON_BYTES} bytes";
+
+            // Count spawns per client in one second windows
+            long now = Environment.TickCount64;
+            if (!_spawnCounts.TryGetValue(client, out var spawns) || now - spawns.WindowStart >= 1000)
+            {
+                spawns = (0, now);
+            }
+            spawns.Count++;
+            _spawnCounts[client] = spawns;
+            if (spawns.Count > MaxSpawnsPerSecond)
+                return $"more than {MaxSpawnsPerSecond} spawns per second";
+
+            return null;
         }
 
         private void HandleNetworkClassRequestSync(ushort client, NetworkGameClassRequestSyncData data)
@@ -235,14 +292,42 @@ namespace Atlas2D.Networking.Core
                 return;
             }
 
+            if (data.TotalCount > 0)
+            {
+                if (!_pendingSnapshots.TryGetValue(data.ToClient, out var pending) || pending.Expected != data.TotalCount)
+                {
+                    pending = (data.TotalCount, new List<NetworkNodeData>());
+                }
+                pending.Nodes.AddRange(data.GameClasses);
+                _pendingSnapshots[data.ToClient] = pending;
+
+                // Wait until every node has arrived
+                if (pending.Nodes.Count < pending.Expected) return;
+                _pendingSnapshots.Remove(data.ToClient);
+                _syncingClientSnapshots[data.ToClient] = pending.Nodes;
+            }
+
             Debug.Log("(SERVER): Received requested sync data from host. Asking client to sync...");
-            if(data.GameClasses.Length > 0) _syncingClientSnapshots.Add(data.ToClient, [.. data.GameClasses]);
             Message returnMessage = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeSync);
-            returnMessage.AddInt(data.GameClasses.Length);
+            returnMessage.AddInt(Math.Max(data.TotalCount, 0));
             Send(returnMessage, data.ToClient);
         }
         private void HandleNetworkClassSpawned(ushort client, NetworkNodeData data)
         {
+            string invalidReason = ValidateSpawn(client, data);
+            if (invalidReason != null)
+            {
+                Debug.LogWarning($"(SERVER): Rejected spawn from client [{client}]: {invalidReason}.");
+                // Only reply if the ID fits in a message
+                if (!string.IsNullOrEmpty(data.NetworkID) && data.NetworkID.Length <= Network.MAX_NETWORK_ID_LENGTH)
+                {
+                    Message rejectMessage = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeDespawned);
+                    rejectMessage.AddString(data.NetworkID);
+                    Send(rejectMessage, client);
+                }
+                return;
+            }
+
             bool despawn = false;
             if (!AllowNonHostOwnership && client != _hostID)
             {
@@ -260,7 +345,7 @@ namespace Atlas2D.Networking.Core
 
             if (_networkGameClassOwners.ContainsKey(data.NetworkID) || despawn)
             {
-                Debug.LogError($"(SERVER): Network game class with id [{data.NetworkID}] already exists on the server. Cannot spawn.");
+                if (!despawn) Debug.LogError($"(SERVER): Network game class with id [{data.NetworkID}] already exists on the server. Cannot spawn.");
                 Message despawnMessage = Message.Create(MessageSendMode.Reliable, (ushort)BuiltInMessageType.NetworkNodeDespawned);
                 despawnMessage.AddString(data.NetworkID);
                 Send(despawnMessage, client);
@@ -287,6 +372,13 @@ namespace Atlas2D.Networking.Core
         }
         private void HandleNetworkClassUpdated(ushort client, NetworkNodeUpdatedData data)
         {
+            if (data.NetworkID == null || data.Json == null || !Enum.IsDefined(data.MessageSendMode)
+                || System.Text.Encoding.UTF8.GetByteCount(data.Json) > Network.MAX_NODE_JSON_BYTES)
+            {
+                Debug.LogWarning($"(SERVER): Rejected an invalid update from client [{client}].");
+                return;
+            }
+
             if(!_networkGameClassOwners.ContainsKey(data.NetworkID))
             {
                 Debug.LogError($"(SERVER): Client {client} is trying to update a network game class with " +
@@ -393,6 +485,10 @@ namespace Atlas2D.Networking.Core
                 Stop();
                 return;
             }
+
+            _syncingClientSnapshots.Remove(e.Client.Id);
+            _pendingSnapshots.Remove(e.Client.Id);
+            _spawnCounts.Remove(e.Client.Id);
 
             _queueNetworkNodes = true;
             foreach (var pair in _networkGameClassOwners)
