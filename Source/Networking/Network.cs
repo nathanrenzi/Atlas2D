@@ -124,6 +124,18 @@ namespace Atlas2D.Networking
             return -1;
         }
 
+        private static CreateNetworkNode GetFactory(Type type)
+        {
+            var constructor = type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, Type.EmptyTypes)
+                ?? throw new InvalidOperationException($"{type.FullName} needs a parameterless constructor to be spawned over the network.");
+            return json =>
+            {
+                NetworkNode node = (NetworkNode)constructor.Invoke(null);
+                node.SetJson(json);
+                return node;
+            };
+        }
+
         public static void RegisterAll()
         {
             var allTypes = AppDomain.CurrentDomain.GetAssemblies()
@@ -151,16 +163,7 @@ namespace Atlas2D.Networking
 
             foreach (var type in networkNodes)
             {
-                if (!typeof(INetworkFactory).IsAssignableFrom(type))
-                {
-                    Debug.LogWarning($"[Network] {type.FullName} is a NetworkNode but does not implement INetworkFactory");
-                    continue;
-                }
-
-                var method = type.GetMethod("FactoryMethod", BindingFlags.Static | BindingFlags.Public)
-                    ?? throw new InvalidOperationException($"{type.FullName} must implement INetworkFactory to be registered.");
-                var del = (CreateNetworkNode)Delegate.CreateDelegate(typeof(CreateNetworkNode), method);
-                int id = RegisterNetworkNode(del);
+                int id = RegisterNetworkNode(GetFactory(type));
                 NetworkNode.AssignRegisterID(type, id);
                 if (type.IsDefined(typeof(HostOnlyAttribute), inherit: true))
                 {

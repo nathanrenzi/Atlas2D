@@ -5,8 +5,8 @@ namespace Atlas2D.Networking
     /// <summary>
     /// An abstract node that provides the boilerplate for networked game objects.
     /// Extends <see cref="TransformNode"/> so any subclass has a position in the world.
-    /// Subclasses must implement <see cref="INetworkFactory"/> to be automatically discovered
-    /// by <see cref="Network.RegisterAll"/>.
+    /// Every non-abstract subclass is registered by <see cref="Network.RegisterAll"/> and needs a parameterless
+    /// constructor (it can be private). Remote copies are created with it and then given their state through SetJson.
     /// </summary>
     public abstract class NetworkNode : TransformNode
     {

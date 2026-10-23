@@ -7,7 +7,7 @@ namespace Atlas2D.Networking
     /// <summary>
     /// Replicates position, rotation, and scale over the network.
     /// </summary>
-    public class NetworkTransformNode : NetworkNode, INetworkFactory
+    public class NetworkTransformNode : NetworkNode
     {
         [Serializable]
         private class NetworkTransformInitializationJson
@@ -18,13 +18,6 @@ namespace Atlas2D.Networking
             public NetworkValueSettings PositionNetworkSettings;
             public NetworkValueSettings RotationNetworkSettings;
             public NetworkValueSettings ScaleNetworkSettings;
-        }
-
-        public static NetworkNode FactoryMethod(string json)
-        {
-            NetworkTransformNode node = new NetworkTransformNode();
-            node.SetJson(json);
-            return node;
         }
 
         public Vector2 Scale
