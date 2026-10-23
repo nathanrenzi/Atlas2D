@@ -45,6 +45,8 @@ namespace Atlas2D
         /// <summary>
         /// Gets the path of a file inside the engine's resource folder.
         /// </summary>
+        private static string CacheKey(string key, bool nonColor) => nonColor ? key + "|noncolor" : key;
+
         public static string GetEngineResourcePath(string localPath)
         {
             return Path.Combine(ProjectSettings.EngineResourcePath, localPath);
@@ -56,21 +58,21 @@ namespace Atlas2D
         /// If the file is missing or can't be split, a one layer magenta and black placeholder is returned instead.
         /// </summary>
         public static SharedResource<Texture2DArray> GetTextureArray(string path, int layers, bool nonColor = false)
-            => GetTextureArray($"{path}:{layers}", new[] { path }, () => TextureFactory.LoadArray(path, layers, nonColor));
+            => GetTextureArray(CacheKey($"{path}:{layers}", nonColor), new[] { path }, () => TextureFactory.LoadArray(path, layers, nonColor));
 
         /// <summary>
         /// Gets a cached texture array with one layer per image, in the order given. Every image must be the same size.
         /// If a file is missing or the sizes don't match, a one layer magenta and black placeholder is returned instead.
         /// </summary>
         public static SharedResource<Texture2DArray> GetTextureArray(string[] paths, bool nonColor = false)
-            => GetTextureArray(string.Join("|", paths), paths, () => TextureFactory.LoadArray(paths, nonColor));
+            => GetTextureArray(CacheKey(string.Join("|", paths), nonColor), paths, () => TextureFactory.LoadArray(paths, nonColor));
 
         /// <summary>
         /// Gets a cached texture array from a spritesheet, with one layer per sprite going left to right, then top to bottom.
         /// If the file is missing or can't be split into sprites of that size, a one layer magenta and black placeholder is returned instead.
         /// </summary>
         public static SharedResource<Texture2DArray> GetTextureArray(string path, int spriteWidth, int spriteHeight, bool nonColor = false)
-            => GetTextureArray($"{path}:{spriteWidth}:{spriteHeight}", new[] { path }, () => TextureFactory.LoadArray(path, spriteWidth, spriteHeight, nonColor));
+            => GetTextureArray(CacheKey($"{path}:{spriteWidth}:{spriteHeight}", nonColor), new[] { path }, () => TextureFactory.LoadArray(path, spriteWidth, spriteHeight, nonColor));
 
         private static SharedResource<Texture2DArray> GetTextureArray(string key, string[] paths, Func<Texture2DArray> load)
         {
@@ -110,7 +112,8 @@ namespace Atlas2D
         /// </summary>
         public static SharedResource<Texture2D> GetTexture(string path, bool nonColor = false)
         {
-            if (!textureCache.TryGetValue(path, out var handle))
+            string key = CacheKey(path, nonColor);
+            if (!textureCache.TryGetValue(key, out var handle))
             {
                 if (!ValidatePath(path)) return GetMissingTexture();
 
@@ -126,7 +129,7 @@ namespace Atlas2D
                 }
 
                 handle = SharedResource<Texture2D>.Create(texture);
-                textureCache.Add(path, handle);
+                textureCache.Add(key, handle);
                 textureHandleCache.Add(texture.Handle, handle);
             }
             return handle.AddRef();

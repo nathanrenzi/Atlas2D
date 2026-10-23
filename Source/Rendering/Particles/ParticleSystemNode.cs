@@ -532,7 +532,7 @@ namespace Atlas2D
                     break;
                 case ParticleEmissionShape.Line:
                     float lineOffset = MathEx.RandomFloatInRange(_random, -EmissionSize / 2f, EmissionSize / 2f);
-                    spawnPosition += Vector2.Normalize(new Vector2(EmissionDirection.Y, EmissionDirection.X)) * lineOffset;
+                    spawnPosition += Vector2.Normalize(new Vector2(-EmissionDirection.Y, EmissionDirection.X)) * lineOffset;
                     alongNormal = EmissionDirection;
                     break;
             }

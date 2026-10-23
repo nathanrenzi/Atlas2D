@@ -34,19 +34,30 @@ namespace Atlas2D.Rendering.Shaders
 
             foreach (var line in File.ReadAllLines(filePath))
             {
-                if (line.ToLower().Contains("#shader"))
+                string trimmed = line.Trim();
+                if (trimmed.StartsWith("#shader", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (line.ToLower().Contains("vertex"))
+                    if (trimmed.Contains("vertex", StringComparison.OrdinalIgnoreCase))
                         shaderType = ShaderType.VERTEX;
-                    else if (line.ToLower().Contains("fragment"))
+                    else if (trimmed.Contains("fragment", StringComparison.OrdinalIgnoreCase))
                         shaderType = ShaderType.FRAGMENT;
                     else
-                        Debug.LogError("No shader type has been supplied for: " + filePath);
+                    {
+                        Debug.LogError($"Unknown shader type \"{trimmed}\" in: {filePath}");
+                        shaderType = ShaderType.NONE;
+                    }
                 }
-                else
+                // Lines before the first #shader (or after an unknown one) don't belong to a shader
+                else if (shaderType != ShaderType.NONE)
                 {
                     shaderSource[(int)shaderType] += line + Environment.NewLine;
                 }
+            }
+
+            if (shaderSource[(int)ShaderType.VERTEX] == null || shaderSource[(int)ShaderType.FRAGMENT] == null)
+            {
+                Debug.LogError($"Shader needs both a #shader vertex and a #shader fragment section: {filePath}");
+                return null;
             }
 
             return new ShaderProgramSource(filePath, shaderSource[(int)ShaderType.VERTEX], shaderSource[(int)ShaderType.FRAGMENT]);
