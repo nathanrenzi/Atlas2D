@@ -58,8 +58,14 @@ namespace Atlas2D
             for (int i = 0; i < Tiles.Length; i++)
                 TileRotations[i] = (byte)_random.Next(0, 4);
 
+            for (int i = 0; i < Tiles.Length; i++)
+            {
+                if (IsColliderTile(Tiles[i]))
+                    CollisionFixtureUpdates[FromIndex(i)] = true;
+            }
+
             _isDirty = true;
-            _isColliderDirty = true;
+            _isColliderDirty = CollisionFixtureUpdates.Count > 0;
         }
 
         public static TilemapNode CreateSharedMaterial(SharedResource<Material> material, TileData[] data,
@@ -219,32 +225,44 @@ namespace Atlas2D
                     Vector2 localPosition = entry.Key;
                     bool add = entry.Value;
 
+                    if (CollisionFixtures.Remove(localPosition, out Fixture existing))
+                    {
+                        body ??= Physics.GetBody(CollisionBody);
+                        body.DestroyFixture(existing);
+                    }
+
                     if (add)
                     {
+                        RigidbodyKinematicDef settings = Data[GetTileID((int)localPosition.X, (int)localPosition.Y)].PhysicsSettings;
                         Vector2 fixturePosition = (localPosition + (Vector2.One * 0.5f)) * _realTilePixelSize / Physics.WorldScalar;
-                        FixtureDef fdef = new FixtureDef();
                         PolygonShape shape = new PolygonShape();
                         shape.SetAsBox(TilePixelSize / Physics.WorldScalar, TilePixelSize / Physics.WorldScalar, fixturePosition, 0);
-                        fdef.shape = shape;
+                        FixtureDef fdef = new FixtureDef()
+                        {
+                            shape = shape,
+                            friction = settings.Friction,
+                            restitution = settings.Bounciness,
+                            filter = new Filter()
+                            {
+                                categoryBits = settings.Layer,
+                                maskBits = settings.HitMask,
+                                groupIndex = settings.GroupIndex
+                            }
+                        };
 
                         if (CollisionBody == 999999999)
                         {
                             BodyDef bodyDef = new BodyDef() { position = WorldPosition / Physics.WorldScalar };
-                            CollisionBody = Physics.CreatePhysicsBody(bodyDef, fdef, new MassData(), true);
+                            uint id = Physics.CreatePhysicsBody(bodyDef, fdef, new MassData(), true);
+                            if (id == uint.MaxValue) continue;
+                            CollisionBody = id;
+                            body = Physics.GetBody(CollisionBody);
+                            CollisionFixtures.Add(localPosition, body.GetFixtureList());
+                            continue;
                         }
 
                         body ??= Physics.GetBody(CollisionBody);
                         CollisionFixtures.Add(localPosition, body.CreateFixture(fdef));
-                    }
-                    else
-                    {
-                        // Destroy the Box2D fixture before removing from tracking
-                        if (CollisionBody != 999999999 && CollisionFixtures.TryGetValue(localPosition, out Fixture fixture))
-                        {
-                            body ??= Physics.GetBody(CollisionBody);
-                            body.DestroyFixture(fixture);
-                        }
-                        CollisionFixtures.Remove(localPosition);
                     }
                 }
                 CollisionFixtureUpdates.Clear();
@@ -264,13 +282,19 @@ namespace Atlas2D
         public void SetTileID(int x, int y, byte tileID)
         {
             int index = ToIndex(x, y);
-            int currentTile = Tiles[index];
-            // Guard against empty tiles (-1) before accessing Data
-            if (currentTile != -1 && !(Data[currentTile].IsCollider && Data[tileID].IsCollider))
-                _isColliderDirty = true;
+            bool wasCollider = IsColliderTile(Tiles[index]);
+            bool isCollider = IsColliderTile(tileID);
             Tiles[index] = tileID;
             _isDirty = true;
+
+            if (wasCollider || isCollider)
+            {
+                CollisionFixtureUpdates[new Vector2(x, y)] = isCollider;
+                _isColliderDirty = true;
+            }
         }
+
+        private bool IsColliderTile(int tileID) => tileID >= 0 && tileID < Data.Length && Data[tileID].IsCollider;
 
         public int GetTileID(int x, int y) => Tiles[ToIndex(x, y)];
         public TileData GetTileData(int x, int y) => Data[GetTileID(x, y)];
