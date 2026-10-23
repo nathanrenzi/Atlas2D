@@ -4,63 +4,60 @@ namespace Atlas2D
 {
     public class TransformNode : Node
     {
+        /// <summary>
+        /// Fires when this node's local transform changes, or when a parent's transform changes.
+        /// </summary>
         public event Action OnTransformChanged;
 
         private Vector2 _localPosition;
         private Vector2 _localScale = Vector2.One;
         private float _localRotation;
 
+        // World values are saved here and only recalculated after something moves
+        private bool _worldDirty = true;
+        private Vector2 _worldPosition;
+        private Vector2 _worldScale;
+        private float _worldRotation;
+        private Matrix4x4 _worldMatrix;
+
+        public TransformNode() : base() { }
+
+        /// <summary>
+        /// Pass false to skip calling <see cref="Node.Load"/> here, then call it at the end of your own constructor.
+        /// </summary>
+        protected TransformNode(bool load) : base(load) { }
+
         public Vector2 LocalPosition
         {
             get => _localPosition;
-            set { _localPosition = value; OnTransformChanged?.Invoke(); }
+            set { _localPosition = value; OnWorldTransformInvalidated(); }
         }
 
         public Vector2 LocalScale
         {
             get => _localScale;
-            set { _localScale = value; OnTransformChanged?.Invoke(); }
+            set { _localScale = value; OnWorldTransformInvalidated(); }
         }
 
         public float LocalRotation
         {
             get => _localRotation;
-            set { _localRotation = value; OnTransformChanged?.Invoke(); }
+            set { _localRotation = value; OnWorldTransformInvalidated(); }
         }
 
         public Vector2 WorldPosition
         {
-            get
-            {
-                var parent = GetParentTransformNode();
-                if (parent == null) return LocalPosition;
-
-                float rad = parent.WorldRotation * MathF.PI / 180f;
-                Vector2 scaled = LocalPosition * parent.WorldScale;
-                Vector2 rotated = new(
-                    scaled.X * MathF.Cos(rad) - scaled.Y * MathF.Sin(rad),
-                    scaled.X * MathF.Sin(rad) + scaled.Y * MathF.Cos(rad)
-                );
-                return parent.WorldPosition + rotated;
-            }
+            get { UpdateWorldTransform(); return _worldPosition; }
         }
 
         public Vector2 WorldScale
         {
-            get
-            {
-                var parent = GetParentTransformNode();
-                return parent != null ? LocalScale * parent.WorldScale : LocalScale;
-            }
+            get { UpdateWorldTransform(); return _worldScale; }
         }
 
         public float WorldRotation
         {
-            get
-            {
-                var parent = GetParentTransformNode();
-                return LocalRotation + (parent?.WorldRotation ?? 0f);
-            }
+            get { UpdateWorldTransform(); return _worldRotation; }
         }
 
         public Matrix4x4 LocalMatrix =>
@@ -70,16 +67,42 @@ namespace Atlas2D
 
         public Matrix4x4 WorldMatrix
         {
-            get
-            {
-                var parent = GetParentTransformNode();
-                return parent != null ? LocalMatrix * parent.WorldMatrix : LocalMatrix;
-            }
+            get { UpdateWorldTransform(); return _worldMatrix; }
         }
 
         private float WorldRadians => WorldRotation * MathF.PI / 180f;
-        public Vector2 Up => new(MathF.Sin(WorldRadians), -MathF.Cos(WorldRadians));
+        public Vector2 Up => new(-MathF.Sin(WorldRadians), MathF.Cos(WorldRadians));
         public Vector2 Right => new(MathF.Cos(WorldRadians), MathF.Sin(WorldRadians));
+
+        internal override void OnWorldTransformInvalidated()
+        {
+            _worldDirty = true;
+            OnTransformChanged?.Invoke();
+            base.OnWorldTransformInvalidated();
+        }
+
+        private void UpdateWorldTransform()
+        {
+            if (!_worldDirty) return;
+
+            var parent = GetParentTransformNode();
+            if (parent == null)
+            {
+                _worldMatrix = LocalMatrix;
+                _worldPosition = LocalPosition;
+                _worldRotation = LocalRotation;
+                _worldScale = LocalScale;
+            }
+            else
+            {
+                _worldMatrix = LocalMatrix * parent.WorldMatrix;
+                _worldPosition = new Vector2(_worldMatrix.M41, _worldMatrix.M42);
+                _worldRotation = LocalRotation + parent.WorldRotation;
+                _worldScale = LocalScale * parent.WorldScale;
+            }
+
+            _worldDirty = false;
+        }
 
         private TransformNode? GetParentTransformNode()
         {

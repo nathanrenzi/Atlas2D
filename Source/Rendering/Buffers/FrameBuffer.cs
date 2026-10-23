@@ -55,11 +55,6 @@ namespace Atlas2D.Rendering
             Unbind();
         }
 
-        ~FrameBuffer()
-        {
-            Dispose();
-        }
-
         public void Bind()
         {
             glBindFramebuffer(GL_FRAMEBUFFER, BufferID);

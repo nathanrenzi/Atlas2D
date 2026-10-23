@@ -12,11 +12,6 @@ namespace Atlas2D.Rendering
             BufferID = glGenVertexArray();
         }
 
-        ~VertexArray()
-        {
-            Dispose();
-        }
-
         public unsafe void AddBuffer(VertexBuffer _vertexBuffer, BufferLayout _bufferLayout)
         {
             Bind();

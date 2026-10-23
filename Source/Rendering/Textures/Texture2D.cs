@@ -24,11 +24,6 @@ namespace Atlas2D.Rendering
             NonColor = nonColor;
         }
 
-        ~Texture2D()
-        {
-            Dispose(false);
-        }
-
         public uint GetHandle() => Handle;
 
         public Vector2 GetSize() => new Vector2(Width, Height);
@@ -115,7 +110,6 @@ namespace Atlas2D.Rendering
         public void Dispose()
         {
             Dispose(true);
-            GC.SuppressFinalize(this);
         }
     }
 }

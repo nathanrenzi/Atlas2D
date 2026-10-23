@@ -20,10 +20,14 @@ namespace Atlas2D
         protected readonly List<UIElement> _uiElements = new List<UIElement>();
 
         protected bool _disposed = false;
+        private bool _disposing = false;
         private bool _disabledByParent = false;
         private bool _desiredEnableState = true;
         private bool _isLoaded = false;
         protected bool _enabled = false;
+
+        // Reused every frame so Update/FixedUpdate don't allocate
+        private readonly List<IGameClass> _updateBuffer = new List<IGameClass>();
 
         public bool Enabled => _enabled && !_disabledByParent;
 
@@ -49,11 +53,6 @@ namespace Atlas2D
             OnLoad();
         }
 
-        ~Node()
-        {
-            Dispose(false);
-        }
-
         /// <summary>
         /// Should create any objects that should be added to the node. Root nodes (nodes with no
         /// parent) should call <see cref="Enable"/> once they're ready to become active.
@@ -67,6 +66,20 @@ namespace Atlas2D
         protected virtual void OnChildAdded(IGameClass child) { }
         protected virtual void OnChildRemoved(IGameClass child) { }
         protected virtual void OnParentChanged(Node newParent) { }
+
+        /// <summary>
+        /// Called when this node's world transform may have changed because it or a parent moved.
+        /// </summary>
+        internal virtual void OnWorldTransformInvalidated()
+        {
+            for (int i = 0; i < _gameClasses.Count; i++)
+            {
+                if (_gameClasses[i] is Node node)
+                {
+                    node.OnWorldTransformInvalidated();
+                }
+            }
+        }
 
         public bool Contains(IGameClass gameClass)
         {
@@ -136,11 +149,12 @@ namespace Atlas2D
             _uiElements.Add(element);
         }
 
+        /// <summary>
+        /// Removes a child. The child goes back to being updated by the game as a root.
+        /// </summary>
         public void RemoveChild(IGameClass gameClass)
         {
-            if (_disposed) return;
-
-            _gameClasses.Remove(gameClass);
+            if (_disposed || !_gameClasses.Remove(gameClass)) return;
             OnChildRemoved(gameClass);
 
             if (gameClass is Node sg)
@@ -154,6 +168,8 @@ namespace Atlas2D
                     sg.EnableInternal(false);
                 }
             }
+
+            Engine.Game.RegisterGameClass(gameClass);
         }
 
         public void RemoveChild(UIElement element)
@@ -168,6 +184,7 @@ namespace Atlas2D
             if (_disposed) return;
 
             Parent = parent;
+            OnWorldTransformInvalidated();
             OnParentChanged(parent);
         }
 
@@ -197,7 +214,11 @@ namespace Atlas2D
                 element.Enabled = true;
                 element.InvalidateMeasure();
             }
-            UICanvas.Instance.UpdateLayout(); // Temporary fix to force re-enabled elements to immediately recalculate
+            if (_uiElements.Count > 0)
+            {
+                // Lays out re-enabled elements right away. The canvas doesn't exist before Load().
+                UICanvas.Instance?.UpdateLayout();
+            }
             foreach (var cls in _gameClasses)
             {
                 if (cls is Node sg)
@@ -256,11 +277,19 @@ namespace Atlas2D
         {
             if (_disposed || !_enabled) return;
 
-            foreach (var gameClass in _gameClasses.ToArray())
+            // Children can add or remove children while updating, so loop over a copy
+            _updateBuffer.AddRange(_gameClasses);
+            for (int i = 0; i < _updateBuffer.Count; i++)
             {
+                if (_disposed) break;
+                IGameClass gameClass = _updateBuffer[i];
+                // Skip nodes that were removed or disposed earlier this frame
+                if (gameClass is Node node && (node.Parent != this || node._disposed)) continue;
                 gameClass.Update();
             }
+            _updateBuffer.Clear();
 
+            if (_disposed) return;
             OnUpdate();
         }
 
@@ -268,11 +297,17 @@ namespace Atlas2D
         {
             if (_disposed || !_enabled) return;
 
-            foreach (var gameClass in _gameClasses.ToArray())
+            _updateBuffer.AddRange(_gameClasses);
+            for (int i = 0; i < _updateBuffer.Count; i++)
             {
+                if (_disposed) break;
+                IGameClass gameClass = _updateBuffer[i];
+                if (gameClass is Node node && (node.Parent != this || node._disposed)) continue;
                 gameClass.FixedUpdate();
             }
+            _updateBuffer.Clear();
 
+            if (_disposed) return;
             OnFixedUpdate();
         }
 
@@ -281,31 +316,40 @@ namespace Atlas2D
         /// </summary>
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
+            if (_disposed || _disposing) return;
+            _disposing = true;
 
-        private void Dispose(bool disposing)
-        {
-            if (_disposed) return;
-            _disposed = true;
+            // Runs OnDisable first, so nodes only need to clean up once
+            DisableInternal(false);
 
-            if (disposing)
+            if (Parent != null)
             {
-                foreach (var gameClass in _gameClasses)
-                {
-                    gameClass.Dispose();
-                }
-                foreach (var element in _uiElements)
-                {
-                    element.Dispose();
-                }
-                Engine.Game.UnregisterGameClass(this);
-                OnDispose();
+                Node parent = Parent;
+                parent._gameClasses.Remove(this);
+                parent.OnChildRemoved(this);
+                Parent = null;
             }
 
+            _disposed = true;
+
+            IGameClass[] children = _gameClasses.ToArray();
             _gameClasses.Clear();
+            foreach (var gameClass in children)
+            {
+                // Stops the child from trying to remove itself from this node
+                if (gameClass is Node node) node.Parent = null;
+                gameClass.Dispose();
+            }
+
+            UIElement[] elements = _uiElements.ToArray();
             _uiElements.Clear();
+            foreach (var element in elements)
+            {
+                element.Dispose();
+            }
+
+            Engine.Game.UnregisterGameClass(this);
+            OnDispose();
         }
     }
 }

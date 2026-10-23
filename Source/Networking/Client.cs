@@ -52,11 +52,6 @@ namespace Atlas2D.Networking.Core
             RiptideClient.ClientDisconnected += (obj, e) => ClientDisconnected?.Invoke(e.Id);
         }
 
-        ~Client()
-        {
-            Dispose();
-        }
-
         public void SetServer(Server server)
         {
             if (_server != null) return;
@@ -396,7 +391,6 @@ namespace Atlas2D.Networking.Core
 
         public void Dispose()
         {
-            GC.SuppressFinalize(this);
             Disconnect();
         }
     }

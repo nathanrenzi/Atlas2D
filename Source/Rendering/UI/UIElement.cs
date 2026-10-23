@@ -1003,7 +1003,6 @@ namespace Atlas2D.UI
             Renderer?.Dispose();
             UICanvas.Instance?.UnregisterUIElement(this);
 
-            GC.SuppressFinalize(this);
         }
 
 
@@ -1011,11 +1010,6 @@ namespace Atlas2D.UI
         /// Called when this element is being disposed. Override to add custom cleanup logic.
         /// </summary>
         protected virtual void OnDispose() { }
-
-        ~UIElement()
-        {
-            Dispose();
-        }
 
         public enum MaskWriteMode
         {

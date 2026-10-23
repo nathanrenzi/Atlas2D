@@ -20,6 +20,7 @@ namespace Atlas2D.Rendering
         public Action OnAfterRender { get; set; }
 
         private TransformNode? _transform;
+        private bool _disposed = false;
 
         /// <summary>
         /// If enabled, the object will not move in world space, but will instead stay in one place in screen space.
@@ -46,21 +47,12 @@ namespace Atlas2D.Rendering
         {
             _transform = null;
             Material = material.AddRef();
-
-            Engine.Game.RegisterGameClass(this);
         }
 
         public MeshRenderer(TransformNode transform, SharedResource<Material> material)
         {
             _transform = transform;
             Material = material.AddRef();
-
-            Engine.Game.RegisterGameClass(this);
-        }
-
-        ~MeshRenderer()
-        {
-            Dispose();
         }
 
         public void Update() { }
@@ -68,7 +60,8 @@ namespace Atlas2D.Rendering
 
         public void Dispose()
         {
-            Engine.Game.UnregisterGameClass(this);
+            if (_disposed) return;
+            _disposed = true;
             if(IsLoaded)
             {
                 VertexBuffer.Dispose();
@@ -76,7 +69,6 @@ namespace Atlas2D.Rendering
                 IndexBuffer.Dispose();
             }
             Material.Release();
-            GC.SuppressFinalize(this);
         }
 
         #region Materials
