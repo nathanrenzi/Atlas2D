@@ -228,8 +228,9 @@ namespace Atlas2D.UI
 
             for (int i = 0; i < text.Length; i++)
             {
-                Character character = FontGlyphStore.Value.Characters[text[i]];
-                uint charIndex = FT_Get_Char_Index(FontGlyphStore.Value.Face, text[i]);
+                char glyph = FontGlyphStore.Value.Resolve(text[i]);
+                Character character = FontGlyphStore.Value.Characters[glyph];
+                uint charIndex = FT_Get_Char_Index(FontGlyphStore.Value.Face, glyph);
 
                 if(i > 0 && FontGlyphStore.Value.UseKerning &&
                     FT_Get_Kerning(FontGlyphStore.Value.Face, previousIndex, charIndex, (uint)FT_Kerning_Mode.FT_KERNING_DEFAULT, out FT_Vector delta) == FT_Error.FT_Err_Ok)
@@ -302,8 +303,9 @@ namespace Atlas2D.UI
                     for (int k = 0; k < line.Text.Length; k++)
                     {
                         char c = line.Text[k];
-                        Character character = FontGlyphStore.Value.Characters[c];
-                        charIndex = FT_Get_Char_Index(FontGlyphStore.Value.Face, c);
+                        char glyph = FontGlyphStore.Value.Resolve(c);
+                        Character character = FontGlyphStore.Value.Characters[glyph];
+                        charIndex = FT_Get_Char_Index(FontGlyphStore.Value.Face, glyph);
 
                         if(FontGlyphStore.Value.UseKerning)
                         {

@@ -14,6 +14,7 @@ namespace Atlas2D.Rendering.Text
         public bool UseKerning { get; }
         public int Ascent { get; private set; }
         public int Descent { get; private set; }
+        public char FallbackCharacter { get; private set; } = '?';
         private bool _isDone = false;
 
         public FontGlyphStore(SharedResource<Texture2D> texture, int fontSize, string fontFile, FreeTypeLibrary library, IntPtr face, bool useKerning)
@@ -36,6 +37,12 @@ namespace Atlas2D.Rendering.Text
         {
             if (_isDone) return;
             _isDone = true;
+
+            if (Characters.ContainsKey('?')) FallbackCharacter = '?';
+            else if (Characters.ContainsKey(' ')) FallbackCharacter = ' ';
+            else if (Characters.Count > 0) FallbackCharacter = Characters.Keys.First();
+            else Debug.LogError($"FONT: {Arguments.FontFile} has no glyphs.");
+
             foreach (var character in Characters.Values)
             {
                 int descent = (int)(character.Size.Y - character.Bearing.Y);
@@ -50,6 +57,16 @@ namespace Atlas2D.Rendering.Text
                 }
             }
         }
+
+        /// <summary>
+        /// Returns true if the font has a glyph for this character.
+        /// </summary>
+        public bool HasCharacter(char c) => Characters.ContainsKey(c);
+
+        /// <summary>
+        /// Returns the character to draw for c: c itself if the font has it, otherwise <see cref="FallbackCharacter"/>.
+        /// </summary>
+        public char Resolve(char c) => Characters.ContainsKey(c) ? c : FallbackCharacter;
 
         public void Dispose()
         {
