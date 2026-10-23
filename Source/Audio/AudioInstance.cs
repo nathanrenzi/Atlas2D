@@ -79,10 +79,25 @@ namespace Atlas2D.Audio
         {
             if (Stream == null) return;
             Stream.OnStreamEnd += Stop;
-            Stream.VolumeFadeSampleProvider.OnFadeInEnd += () => OnFadeInEnd?.Invoke();
-            Stream.VolumeFadeSampleProvider.OnFadeOutEnd += () => OnFadeOutEnd?.Invoke();
+            Stream.VolumeFadeSampleProvider.OnFadeInEnd += FireFadeInEnd;
+            Stream.VolumeFadeSampleProvider.OnFadeOutEnd += FireFadeOutEnd;
             Stream.SetFadeTime(StartStopVolumeFadeTime);
         }
+
+        private void UnhookStreamEvents()
+        {
+            if (Stream == null) return;
+            Stream.OnStreamEnd -= Stop;
+            Stream.VolumeFadeSampleProvider.OnFadeInEnd -= FireFadeInEnd;
+            Stream.VolumeFadeSampleProvider.OnFadeOutEnd -= FireFadeOutEnd;
+        }
+
+        private void FireFadeInEnd() => OnFadeInEnd?.Invoke();
+        private void FireFadeOutEnd() => OnFadeOutEnd?.Invoke();
+
+        /// <summary>
+        /// Swaps the stream this instance plays. The old stream isn't disposed.
+        /// </summary>
 
         public void SetAudioStream(AudioStream stream)
         {
@@ -97,10 +112,16 @@ namespace Atlas2D.Audio
                     "Check the sample rate and other settings to make sure they match.");
                 return;
             }
+            if (stream == Stream) return;
             bool shouldPlay = PlaybackState == PlaybackState.Playing;
             if (shouldPlay) Stop();
 
-            Stream?.Dispose();
+            // Takes the old stream out of the mixer without closing it
+            if (Stream != null)
+            {
+                UnhookStreamEvents();
+                AudioSystem.RemoveStream(Stream);
+            }
             Stream = stream;
             Stream.EnableLooping = IsLoop;
             HookStreamEvents();
@@ -118,7 +139,7 @@ namespace Atlas2D.Audio
 
         public void Play()
         {
-            if (Stream == null) return;
+            if (Stream == null || Stream.IsDisposed) return;
             Stream.SetFadeDirection(1);
             Stream.Position = 0;
             PlaybackState = PlaybackState.Playing;
@@ -127,7 +148,7 @@ namespace Atlas2D.Audio
 
         public void Play(long position)
         {
-            if (Stream == null) return;
+            if (Stream == null || Stream.IsDisposed) return;
             Stream.SetFadeDirection(1);
             Stream.Position = IsLoop ? position % Stream.Length : Math.Min(position, Stream.Length);
             PlaybackState = PlaybackState.Playing;
@@ -144,7 +165,7 @@ namespace Atlas2D.Audio
 
         public void Unpause()
         {
-            if (Stream == null) return;
+            if (Stream == null || Stream.IsDisposed) return;
             if (PlaybackState == PlaybackState.Stopped || PlaybackState == PlaybackState.Playing) return;
             Stream.SetFadeDirection(1);
             PlaybackState = PlaybackState.Playing;

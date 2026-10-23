@@ -415,9 +415,15 @@ namespace Atlas2D
 
             OnGameClose();
             List<IGameClass> classesCopy = new List<IGameClass>(_classes);
+
+            // Network goes first, so disconnect events run while the rest of the game still exists
             foreach (IGameClass gameClass in classesCopy)
             {
-                gameClass.Dispose();
+                if (gameClass is Network) gameClass.Dispose();
+            }
+            foreach (IGameClass gameClass in classesCopy)
+            {
+                if (gameClass is not Network) gameClass.Dispose();
             }
             PhysicsCancellationToken.Cancel();
             PhysicsThread.Join();

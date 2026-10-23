@@ -14,9 +14,10 @@ namespace Atlas2D.Audio
         public override long Length => _sourceStream.Length;
         public override long Position
         {
-            get => _sourceStream.Position;
-            set => _sourceStream.Position = value;
+            get => _disposed ? 0 : _sourceStream.Position;
+            set { if (!_disposed) _sourceStream.Position = value; }
         }
+        public bool IsDisposed => _disposed;
         /// <summary>
         /// Controls how quickly spatialization values (volume and panning) track their targets.
         /// Lower values = slower/smoother transitions; higher values = faster response.
@@ -117,6 +118,7 @@ namespace Atlas2D.Audio
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            if (_disposed) return 0;
             if (VolumeFadeSampleProvider.GetCurrentSampleCount() < 0)
             {
                 _volumeSampleProvider.Volume = 0f;
