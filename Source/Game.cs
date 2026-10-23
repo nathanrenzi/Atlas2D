@@ -26,35 +26,53 @@ namespace Atlas2D
         protected CameraNode DefaultCamera { get; set; }
 
         private bool _doFixedUpdate = false;
+        // _classes keeps update order, and the sets allow for O(1) Contains() calls
         private List<IGameClass> _classes = new List<IGameClass>();
+        private HashSet<IGameClass> _classesSet = new HashSet<IGameClass>();
         private List<IGameClass> _classesAddQueue = new List<IGameClass>();
-        private List<IGameClass> _classesRemoveQueue = new List<IGameClass>();
+        private HashSet<IGameClass> _classesAddSet = new HashSet<IGameClass>();
+        private HashSet<IGameClass> _classesRemoveQueue = new HashSet<IGameClass>();
+        private readonly Predicate<IGameClass> _isQueuedForRemoval;
         private bool _useClassesQueue = false;
         private BlendMode _currentBlendMode = BlendMode.Interpolative;
         private bool _hasExited = false;
 
+        protected Game()
+        {
+            // Cached so PopClassesQueue doesn't allocate a delegate every frame
+            _isQueuedForRemoval = c => _classesRemoveQueue.Contains(c);
+        }
+
         private void PopClassesQueue()
         {
-            for (int i = 0; i < _classesRemoveQueue.Count; i++)
+            if (_classesRemoveQueue.Count > 0)
             {
-                _classesAddQueue.Remove(_classesRemoveQueue[i]);
+                _classes.RemoveAll(_isQueuedForRemoval);
+                foreach (IGameClass gameClass in _classesRemoveQueue)
+                {
+                    _classesSet.Remove(gameClass);
+                }
+                _classesRemoveQueue.Clear();
             }
             for (int i = 0; i < _classesAddQueue.Count; i++)
             {
-                _classes.Add(_classesAddQueue[i]);
+                if (_classesSet.Add(_classesAddQueue[i]))
+                    _classes.Add(_classesAddQueue[i]);
             }
             _classesAddQueue.Clear();
-            _classesRemoveQueue.Clear();
+            _classesAddSet.Clear();
         }
 
         public void RegisterGameClass(IGameClass gameClass)
         {
-            if (_classes.Contains(gameClass) || _classesAddQueue.Contains(gameClass)) return;
             if (_useClassesQueue)
             {
-                _classesAddQueue.Add(gameClass);
+                // Cancel a removal queued earlier this frame (RemoveChild then RegisterGameClass)
+                _classesRemoveQueue.Remove(gameClass);
+                if (!_classesSet.Contains(gameClass) && _classesAddSet.Add(gameClass))
+                    _classesAddQueue.Add(gameClass);
             }
-            else
+            else if (_classesSet.Add(gameClass))
             {
                 _classes.Add(gameClass);
             }
@@ -64,12 +82,21 @@ namespace Atlas2D
         {
             if (_useClassesQueue)
             {
-                _classesRemoveQueue.Add(gameClass);
+                // Added and removed in the same frame, so it never reached _classes
+                if (_classesAddSet.Remove(gameClass))
+                {
+                    _classesAddQueue.Remove(gameClass);
+                    return;
+                }
+                if (_classesSet.Contains(gameClass))
+                    _classesRemoveQueue.Add(gameClass);
             }
             else
             {
-                _classesAddQueue.Remove(gameClass);
-                _classes.Remove(gameClass);
+                if (_classesAddSet.Remove(gameClass))
+                    _classesAddQueue.Remove(gameClass);
+                if (_classesSet.Remove(gameClass))
+                    _classes.Remove(gameClass);
             }
         }
 
@@ -226,6 +253,8 @@ namespace Atlas2D
                 _useClassesQueue = true;
                 foreach (IGameClass gameClass in _classes)
                 {
+                    // Skip classes removed earlier this frame (re-parented or disposed)
+                    if (_classesRemoveQueue.Contains(gameClass)) continue;
                     gameClass.Update();
                 }
                 _useClassesQueue = false;
@@ -242,6 +271,7 @@ namespace Atlas2D
                     _useClassesQueue = true;
                     foreach (IGameClass gameClass in _classes)
                     {
+                        if (_classesRemoveQueue.Contains(gameClass)) continue;
                         gameClass.FixedUpdate();
                     }
                     _doFixedUpdate = false;
