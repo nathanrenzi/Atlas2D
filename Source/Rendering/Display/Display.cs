@@ -56,6 +56,7 @@ namespace Atlas2D
             Glfw.WindowHint(Hint.Focused, true);
             Glfw.WindowHint(Hint.Resizable, false);
             Glfw.WindowHint(Hint.Samples, 4);
+            Glfw.WindowHint(Hint.SrgbCapable, true);
             Glfw.WindowHint(Hint.Maximized, settings.WindowMode == WindowMode.Fullscreen);
 
             Window = Glfw.CreateWindow(width, height, title, GLFW.Monitor.None, Window.None);
