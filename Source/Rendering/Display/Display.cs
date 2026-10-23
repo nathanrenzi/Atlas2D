@@ -106,8 +106,18 @@ namespace Atlas2D
 
         private static void OnFramebufferResize(Window window, int width, int height)
         {
+            UpdateWindowSize(width, height);
+        }
+
+        private static void UpdateWindowSize(int width, int height)
+        {
+            // The size is 0 while the window is minimized
+            if (width <= 0 || height <= 0) return;
+
             glViewport(0, 0, width, height);
-            WindowSize = new Vector2(width, height);
+            Vector2 size = new Vector2(width, height);
+            if (size == WindowSize) return;
+            WindowSize = size;
             OnWindowResize?.Invoke();
         }
 
@@ -133,14 +143,13 @@ namespace Atlas2D
         {
             Settings settings = Engine.Game.Settings;
             Rectangle screen = Monitor.WorkArea;
+            VideoMode video = Glfw.GetVideoMode(Monitor);
             switch (mode)
             {
                 default:
                 case WindowMode.Fullscreen:
-                    Glfw.SetWindowMonitor(Window, Monitor, 0, 0, screen.Width,
-                        screen.Height, settings.RefreshRate);
-                    glViewport(screen.X, screen.Y, screen.Width, screen.Height);
-                    WindowSize = new Vector2(screen.Width, screen.Height);
+                    Glfw.SetWindowMonitor(Window, Monitor, 0, 0, video.Width,
+                        video.Height, settings.RefreshRate);
                     break;
                 case WindowMode.Windowed:
                     Glfw.SetWindowAttribute(Window, WindowAttribute.Decorated, true);
@@ -149,18 +158,19 @@ namespace Atlas2D
                         (screen.Height - settings.WindowHeight) / 2 + screen.Y,
                         settings.WindowWidth,
                         settings.WindowHeight, settings.RefreshRate);
-                    glViewport(0, 0, settings.WindowWidth, settings.WindowHeight);
-                    WindowSize = new Vector2(settings.WindowWidth, settings.WindowHeight);
                     break;
                 case WindowMode.BorderlessWindow:
+                    // Covers the whole monitor, including the taskbar
+                    Glfw.GetMonitorPosition(Monitor, out int monitorX, out int monitorY);
                     Glfw.SetWindowAttribute(Window, WindowAttribute.Decorated, false);
-                    Glfw.SetWindowMonitor(Window, GLFW.Monitor.None, screen.X, screen.Y, screen.Width,
-                        screen.Height, settings.RefreshRate);
-                    glViewport(0, 0, screen.Width, screen.Height);
-                    WindowSize = new Vector2(screen.Width, screen.Height);
+                    Glfw.SetWindowMonitor(Window, GLFW.Monitor.None, monitorX, monitorY, video.Width,
+                        video.Height, settings.RefreshRate);
                     break;
             }
-            OnWindowResize?.Invoke();
+
+            // Uses the real size the window ended up with
+            Glfw.GetFramebufferSize(Window, out int width, out int height);
+            UpdateWindowSize(width, height);
         }
 
         public static void SetAntialiasingMode(AntialiasingMode antialiasing)

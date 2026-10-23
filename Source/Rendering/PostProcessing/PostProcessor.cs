@@ -48,6 +48,7 @@ namespace Atlas2D.Rendering.PostProcessing
         private VertexArray _vertexArray;
         private bool _readingBuffer1 = false;
         private bool _initialized = false;
+        private Vector2 _bufferSize;
 
         public void Initialize()
         {
@@ -56,6 +57,19 @@ namespace Atlas2D.Rendering.PostProcessing
 
             _shader = new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/PostProcessing/DefaultPostProcessing.glsl")), true);
 
+            CreateFrameBuffers();
+            Display.OnWindowResize += OnWindowResize;
+
+            _vertexArray = new VertexArray();
+            _vertexBuffer = new VertexBuffer(_vertices);
+            BufferLayout layout = new BufferLayout();
+            layout.Add<float>(2); // Position
+            layout.Add<float>(2); // UV
+            _vertexArray.AddBuffer(_vertexBuffer, layout);
+        }
+
+        private void CreateFrameBuffers()
+        {
             bool useHDR = ProjectSettings.UseHDRFrameBuffers;
             _renderBuffer = new FrameBuffer();
             _renderBuffer.AttachRenderBuffer(4, useHDR ? GL_RGBA16F : GL_RGBA, GL_COLOR_ATTACHMENT0);
@@ -64,13 +78,16 @@ namespace Atlas2D.Rendering.PostProcessing
             _frameBuffer2 = new FrameBuffer();
             _frameBuffer2.AttachTexture2D(useHDR ? GL_RGBA16F : GL_RGBA, GL_NEAREST, GL_CLAMP_TO_EDGE);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            _bufferSize = Display.WindowSize;
+        }
 
-            _vertexArray = new VertexArray();
-            _vertexBuffer = new VertexBuffer(_vertices);
-            BufferLayout layout = new BufferLayout();
-            layout.Add<float>(2); // Position
-            layout.Add<float>(2); // UV
-            _vertexArray.AddBuffer(_vertexBuffer, layout);
+        private void OnWindowResize()
+        {
+            if (Display.WindowSize == _bufferSize) return;
+            _renderBuffer.Dispose();
+            _frameBuffer1.Dispose();
+            _frameBuffer2.Dispose();
+            CreateFrameBuffers();
         }
 
         public void BeforeGameRender()
@@ -144,11 +161,8 @@ namespace Atlas2D.Rendering.PostProcessing
 
         public void Register(PostProcessingStack stack)
         {
-            if(!_initialized)
-            {
-                _initialized = true;
-                Initialize();
-            }
+            Initialize();
+            if (_stacks.Contains(stack)) return;
 
             bool inserted = false;
             for (int i = 0; i < _stacks.Count; i++)
