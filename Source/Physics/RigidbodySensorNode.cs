@@ -52,10 +52,14 @@ namespace Atlas2D.PhysicsBox2D
             Sensors.Add(this);
 
             Vector2 pos = WorldPosition + (Up * Offset.Y) + (Right * Offset.X);
+            // Must be a dynamic body to sense kinematic bodies
             BodyDef bodyDef = new BodyDef()
             {
                 position = pos / Physics.WorldScalar,
                 angle = WorldRotation * MathF.PI / 180f,
+                gravityScale = 0,
+                allowSleep = false,
+                fixedRotation = true
             };
 
             FixtureDef fixtureDef = new FixtureDef()
@@ -82,7 +86,7 @@ namespace Atlas2D.PhysicsBox2D
                     break;
             }
 
-            ID = Physics.CreatePhysicsBody(bodyDef, fixtureDef, new MassData(), true);
+            ID = Physics.CreatePhysicsBody(bodyDef, fixtureDef, new MassData(), false);
             _isValid = ID != uint.MaxValue;
             if (_isValid) _sensorsByID[ID] = this;
         }

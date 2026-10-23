@@ -10,6 +10,14 @@ namespace Atlas2D.PhysicsBox2D
         public Vector2 Point;
         public float Fraction;
         public Fixture Fixture;
+        /// <summary>
+        /// The physics ID of the body that was hit.
+        /// </summary>
+        public uint BodyID = uint.MaxValue;
+        /// <summary>
+        /// The rigidbody that was hit, or null if the body isn't a <see cref="RigidbodyNode"/>.
+        /// </summary>
+        public RigidbodyNode Rigidbody => Hit ? RigidbodyNode.GetByID(BodyID) : null;
         public float Distance = 0;
         public float MaxDistance = 0;
 
@@ -22,11 +30,12 @@ namespace Atlas2D.PhysicsBox2D
             Fixture = null;
         }
 
-        public void Callback(Fixture fixture, Vector2 point, Vector2 normal, float fraction)
+        internal void Set(Fixture fixture, uint bodyID, Vector2 point, Vector2 normal, float fraction)
         {
-            Hit = fixture != null;
+            Hit = true;
             Fixture = fixture;
-            Point = point * Physics.WorldScalar;
+            BodyID = bodyID;
+            Point = point;
             Normal = normal;
             Fraction = fraction;
             Distance = fraction * MaxDistance;

@@ -18,6 +18,8 @@ namespace Atlas2D.PhysicsBox2D
     /// <item>Getters return the body's state from the end of the last step.</item>
     /// <item>Creating and removing bodies or joints happens right away (it waits for the current step to finish).</item>
     /// </list>
+    /// Positions, velocities, forces and impulses are in pixels (50 pixels = 1 Box2D metre), angles in degrees.
+    /// Mass is in kilograms, so an impulse of mass * 100 changes a body's velocity by 100 pixels per second.
     /// </summary>
     public static class Physics
     {
@@ -416,24 +418,24 @@ namespace Atlas2D.PhysicsBox2D
         }
 
         /// <summary>
-        /// Gets the linear velocity of a physics body after the last step.
+        /// Gets the linear velocity (in pixels per second) of a physics body after the last step.
         /// </summary>
         public static Vector2 GetBodyVelocity(uint _id)
         {
             lock (_stateLock)
             {
-                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.Velocity : Vector2.Zero;
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.Velocity * WorldScalar : Vector2.Zero;
             }
         }
 
         /// <summary>
-        /// Gets the angular velocity of a physics body after the last step.
+        /// Gets the angular velocity (in degrees per second) of a physics body after the last step.
         /// </summary>
         public static float GetBodyAngularVelocity(uint _id)
         {
             lock (_stateLock)
             {
-                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.AngularVelocity : 0;
+                return _bodyStates.TryGetValue(_id, out BodyState state) ? state.AngularVelocity * 180 / MathF.PI : 0;
             }
         }
 
@@ -458,29 +460,29 @@ namespace Atlas2D.PhysicsBox2D
 
         #region Setters
         /// <summary>
-        /// Applies a force to a physics body on the next step.
+        /// Applies a force (in kg * pixels / s^2) to a physics body on the next step.
         /// </summary>
-        /// <param name="_point">The point the force is applied to.</param>
+        /// <param name="_point">The world point (in pixels) the force is applied to.</param>
         public static void ApplyForce(uint _id, Vector2 _force, Vector2 _point)
         {
-            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyForce, ID = _id, Vector = _force, Point = _point });
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyForce, ID = _id, Vector = _force / WorldScalar, Point = _point / WorldScalar });
         }
 
         /// <summary>
-        /// Applies an impulse to a physics body on the next step.
+        /// Applies an impulse (in kg * pixels / s) to a physics body on the next step.
         /// </summary>
-        /// <param name="_point">The point the impulse is applied to.</param>
+        /// <param name="_point">The world point (in pixels) the impulse is applied to.</param>
         public static void ApplyImpulse(uint _id, Vector2 _impulse, Vector2 _point)
         {
-            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyImpulse, ID = _id, Vector = _impulse, Point = _point });
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyImpulse, ID = _id, Vector = _impulse / WorldScalar, Point = _point / WorldScalar });
         }
 
         /// <summary>
-        /// Applies a torque to a physics body on the next step.
+        /// Applies a torque (in kg * pixels^2 / s^2) to a physics body on the next step.
         /// </summary>
         public static void ApplyTorque(uint _id, float _torque)
         {
-            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyTorque, ID = _id, Value = _torque });
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.ApplyTorque, ID = _id, Value = _torque / (WorldScalar * WorldScalar) });
         }
 
         /// <summary>
@@ -492,19 +494,19 @@ namespace Atlas2D.PhysicsBox2D
         }
 
         /// <summary>
-        /// Sets the angular velocity of a physics body on the next step.
+        /// Sets the angular velocity (in degrees per second) of a physics body on the next step.
         /// </summary>
         public static void SetAngularVelocity(uint _id, float _angularVelocity)
         {
-            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetAngularVelocity, ID = _id, Value = _angularVelocity });
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetAngularVelocity, ID = _id, Value = _angularVelocity * MathF.PI / 180 });
         }
 
         /// <summary>
-        /// Sets the linear velocity of a physics body on the next step.
+        /// Sets the linear velocity (in pixels per second) of a physics body on the next step.
         /// </summary>
         public static void SetVelocity(uint _id, Vector2 _linearVelocity)
         {
-            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetVelocity, ID = _id, Vector = _linearVelocity });
+            _commands.Enqueue(new PhysicsCommand() { Type = CommandType.SetVelocity, ID = _id, Vector = _linearVelocity / WorldScalar });
         }
 
         /// <summary>
@@ -534,25 +536,36 @@ namespace Atlas2D.PhysicsBox2D
         #endregion
 
         /// <summary>
-        /// Casts a ray into the physics world, and returns the hit data.
+        /// Casts a ray into the physics world and returns the nearest hit.
         /// </summary>
-        /// <param name="_point">The starting point of the ray.</param>
+        /// <param name="_point">The starting point of the ray, in pixels.</param>
         /// <param name="_direction">The direction of the ray.</param>
-        /// <param name="_maxDistance">The maximum distance the ray can travel.</param>
-        public static bool Raycast(Vector2 _point, Vector2 _direction, float _maxDistance, out RaycastHit hit)
+        /// <param name="_maxDistance">The maximum distance the ray can travel, in pixels.</param>
+        /// <param name="_hitMask">Only fixtures whose layer is in this mask are hit.</param>
+        /// <param name="_hitSensors">Whether sensors can be hit.</param>
+        /// <param name="_ignoreBodyID">A body to ignore, like the one casting the ray.</param>
+        public static bool Raycast(Vector2 _point, Vector2 _direction, float _maxDistance, out RaycastHit hit,
+            ushort _hitMask = 0xFFFF, bool _hitSensors = false, uint _ignoreBodyID = uint.MaxValue)
         {
             hit = new RaycastHit();
             hit.MaxDistance = _maxDistance;
-            try
+            if (_direction == Vector2.Zero || _maxDistance <= 0) return false;
+
+            Vector2 start = _point / WorldScalar;
+            Vector2 end = (_point + Vector2.Normalize(_direction) * _maxDistance) / WorldScalar;
+            RaycastHit result = hit;
+            lock (WorldLock)
             {
-                lock (WorldLock)
+                // Box2D reports every fixture the ray crosses, in no particular order, so the nearest one is kept
+                world.RayCast((fixture, point, normal, fraction) =>
                 {
-                    world.RayCast(hit.Callback, _point, _point + (_direction * _maxDistance));
-                }
-            }
-            catch (Exception e)
-            {
-                return false;
+                    if (fixture.IsSensor() && !_hitSensors) return;
+                    if ((fixture.FilterData.categoryBits & _hitMask) == 0) return;
+                    uint id = GetIDFromBody(fixture.Body);
+                    if (id == _ignoreBodyID) return;
+                    if (result.Hit && fraction >= result.Fraction) return;
+                    result.Set(fixture, id, point * WorldScalar, normal, fraction);
+                }, start, end);
             }
             return hit.Hit;
         }

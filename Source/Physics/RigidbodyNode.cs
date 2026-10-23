@@ -158,8 +158,8 @@ namespace Atlas2D.PhysicsBox2D
             {
                 position = LocalPosition / Physics.WorldScalar,
                 angle = LocalRotation * MathF.PI / 180f,
-                linearVelocity = _velocity,
-                angularVelocity = _angularVelocity,
+                linearVelocity = _velocity / Physics.WorldScalar,
+                angularVelocity = _angularVelocity * MathF.PI / 180f,
                 linearDamping = _linearDampening,
                 angularDamping = _angularDampening,
                 fixedRotation = _fixedRotation,
@@ -433,11 +433,11 @@ namespace Atlas2D.PhysicsBox2D
         /// </summary>
         public Vector2 Size = new Vector2(32, 32);
         /// <summary>
-        /// The starting linear velocity of the rigidbody.
+        /// The starting linear velocity of the rigidbody, in pixels per second.
         /// </summary>
         public Vector2 Velocity = Vector2.Zero;
         /// <summary>
-        /// The starting angular velocity of the rigidbody.
+        /// The starting angular velocity of the rigidbody, in degrees per second.
         /// </summary>
         public float AngularVelocity = 0;
         /// <summary>
