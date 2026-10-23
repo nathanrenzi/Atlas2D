@@ -22,8 +22,7 @@ namespace Atlas2D
         private static int _totalKeyCount;
         private static KeyCode[] _keyValues;
         private static MouseCallback _scrollCallback;
-        private static bool _scrollCallbackFrame = false;
-        private static bool _mouseCallbackFrame = false;
+        private static bool _hasMousePosition = false;
         private static MouseCallback _mouseCallback;
         private static CharCallback _charCallback;
         private static JoystickCallback _joystickCallback;
@@ -154,16 +153,16 @@ namespace Atlas2D
 
         private static void ScrollCallback(Window window, double xOffset, double yOffset)
         {
-            ScrollDelta = (float)yOffset / 10;
-            _scrollCallbackFrame = true;
+            // Several scroll events can arrive in one frame, so they're added up
+            ScrollDelta += (float)yOffset / 10;
         }
 
         private static void MouseCallback(Window window, double x, double y)
         {
-            _mouseCallbackFrame = true;
             Vector2 pos = new Vector2((float)x, (float)y);
-            MouseDelta = pos - MousePosition;
+            if (_hasMousePosition) MouseDelta += pos - MousePosition;
             MousePosition = pos;
+            _hasMousePosition = true;
         }
 
         public static void ProcessInput()
@@ -178,17 +177,10 @@ namespace Atlas2D
                 MOUSE_LAST[i] = MOUSE[i];
             }
 
+            ScrollDelta = 0;
+            MouseDelta = Vector2.Zero;
             Glfw.PollEvents();
             NativeCallbackGuard.RethrowPending();
-            if (!_scrollCallbackFrame)
-            {
-                // If the scroll delta was not updated this frame, set the delta to 0
-                ScrollDelta = 0;
-            }
-            if(!_mouseCallbackFrame)
-            {
-                MouseDelta = Vector2.Zero;
-            }
 
             for (int i = 0; i < _connectedGamepads.Count; i++)
             {
@@ -241,9 +233,6 @@ namespace Atlas2D
                 // Mouse presses
                 MOUSE[i] = Glfw.GetMouseButton(Display.Window, (GLFW.MouseButton)i);
             }
-
-            _scrollCallbackFrame = false;
-            _mouseCallbackFrame = false;
         }
 
         private static bool IsSpecialKey(KeyCode key)
