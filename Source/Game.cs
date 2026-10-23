@@ -194,7 +194,7 @@ namespace Atlas2D
             glEnable(GL_STENCIL_TEST);
             glEnable(GL_FRAMEBUFFER_SRGB);
             if (glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_BACK_LEFT, GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING, 1)[0] != GL_SRGB)
-                Debug.LogWarning($"The window framebuffer is not sRGB on {glGetString(GL_RENDERER)}, colors will appear too dark");
+                Debug.LogWarning($"The window framebuffer is not sRGB on {glGetString(GL_RENDERER)}, colors may appear too dark");
             ApplyBlendingMode();
             _isGraphicsInitialized = true;
             // -----------
