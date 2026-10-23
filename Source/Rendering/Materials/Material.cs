@@ -12,9 +12,12 @@ namespace Atlas2D.Rendering
         public SharedResource<Shader> Shader { get; private set; }
         public SharedResource<Texture2D> MainTexture { get; private set; }
         public SharedResource<Texture2D> NormalTexture { get; private set; }
+        public SharedResource<Texture2DArray> MainTextureArray { get; private set; }
+        public SharedResource<Texture2DArray> NormalTextureArray { get; private set; }
         public float NormalScale { get; set; }
         public Color MainColor { get; set; }
-        public bool UsingLinearFiltering { get; }
+        public bool UseLinearFiltering { get; }
+        public bool UseTextureArrays { get; }
 
         private Material(SharedResource<Shader> shader, SharedResource<Texture2D> mainTexture, SharedResource<Texture2D> normalTexture,
             Color mainColor, bool useLinearFiltering, float normalScale)
@@ -23,41 +26,98 @@ namespace Atlas2D.Rendering
             MainTexture = mainTexture.AddRef();
             NormalTexture = normalTexture.AddRef();
             MainColor = mainColor;
-            UsingLinearFiltering = useLinearFiltering;
+            UseLinearFiltering = useLinearFiltering;
             NormalScale = normalScale;
+            PrepareShader(shader);
+        }
 
-            if (!shader.Value.Compiled)
-            {
-                shader.Value.Compile();
-                shader.Value.Use();
-                shader.Value.SetInt("mainTextureSampler", 0);
-                shader.Value.SetInt("normalTextureSampler", 1);
-            }
+        private Material(SharedResource<Shader> shader, SharedResource<Texture2DArray> mainTextureArray,
+            SharedResource<Texture2DArray> normalTextureArray, Color mainColor, bool useLinearFiltering, float normalScale)
+        {
+            if (mainTextureArray == null)
+                throw new ArgumentNullException(nameof(mainTextureArray), "A texture array material needs a main texture array.");
+
+            Shader = shader.AddRef();
+            MainTextureArray = mainTextureArray.AddRef();
+            NormalTextureArray = normalTextureArray?.AddRef();
+            // Code that only knows about regular textures reads these, so they draw blank instead of crashing
+            MainTexture = _blankTexture.AddRef();
+            NormalTexture = _blankNormal.AddRef();
+            MainColor = mainColor;
+            UseLinearFiltering = useLinearFiltering;
+            UseTextureArrays = true;
+            NormalScale = normalScale;
+            PrepareShader(shader);
+        }
+
+        private static void PrepareShader(SharedResource<Shader> shader)
+        {
+            if (shader.Value.Compiled) return;
+            shader.Value.Compile();
+            shader.Value.Use();
+            shader.Value.SetInt("mainTextureSampler", 0);
+            shader.Value.SetInt("normalTextureSampler", 1);
         }
 
         public void SetShader(SharedResource<Shader> shader)
         {
-            Shader.Release();
+            var previous = Shader;
             Shader = shader.AddRef();
-            if (!Shader.Value.Compiled)
-            {
-                Shader.Value.Compile();
-                Shader.Value.Use();
-                Shader.Value.SetInt("mainTextureSampler", 0);
-                Shader.Value.SetInt("normalTextureSampler", 1);
-            }
+            previous.Release();
+            PrepareShader(Shader);
         }
 
         public void SetMainTexture(SharedResource<Texture2D> mainTexture)
         {
-            MainTexture.Release();
-            MainTexture = mainTexture.AddRef();
+            if(UseTextureArrays)
+            {
+                Debug.LogError("Cannot set a Texture2D on a material that uses a Texture2DArray. Create a new material with Material.Create instead.");
+                return;
+            }
+            var previous = MainTexture;
+            MainTexture = (mainTexture ?? _blankTexture).AddRef();
+            previous.Release();
         }
 
         public void SetNormalTexture(SharedResource<Texture2D> normalTexture)
         {
-            NormalTexture.Release();
-            NormalTexture = normalTexture.AddRef();
+            if (UseTextureArrays)
+            {
+                Debug.LogError("Cannot set a Texture2D on a material that uses a Texture2DArray. Create a new material with Material.Create instead.");
+                return;
+            }
+            var previous = NormalTexture;
+            NormalTexture = (normalTexture ?? _blankNormal).AddRef();
+            previous.Release();
+        }
+
+        public void SetMainTextureArray(SharedResource<Texture2DArray> mainTextureArray)
+        {
+            if (!UseTextureArrays)
+            {
+                Debug.LogError("Cannot set a Texture2DArray on a material that uses a Texture2D. Create a new material with Material.CreateArray instead.");
+                return;
+            }
+            if (mainTextureArray == null)
+            {
+                Debug.LogError("Cannot set the main texture array of a material to null.");
+                return;
+            }
+            var previous = MainTextureArray;
+            MainTextureArray = mainTextureArray.AddRef();
+            previous.Release();
+        }
+
+        public void SetNormalTextureArray(SharedResource<Texture2DArray> normalTextureArray)
+        {
+            if (!UseTextureArrays)
+            {
+                Debug.LogError("Cannot set a Texture2DArray on a material that uses a Texture2D. Create a new material with Material.CreateArray instead.");
+                return;
+            }
+            var previous = NormalTextureArray;
+            NormalTextureArray = normalTextureArray?.AddRef();
+            previous?.Release();
         }
 
         public void Dispose()
@@ -65,6 +125,8 @@ namespace Atlas2D.Rendering
             Shader.Release();
             MainTexture.Release();
             NormalTexture.Release();
+            MainTextureArray?.Release();
+            NormalTextureArray?.Release();
         }
 
         internal static void Initialize()
@@ -80,6 +142,12 @@ namespace Atlas2D.Rendering
         }
 
         #region Static Methods
+        public static Material Create(Color color) => Create(GlobalShaders.Texture, color);
+
+        public static Material Create(SharedResource<Texture2D> mainTexture = null, SharedResource<Texture2D> normalTexture = null,
+            bool useLinearFiltering = false, float normalScale = 1)
+            => Create(GlobalShaders.Texture, Color.White, mainTexture, normalTexture, useLinearFiltering, normalScale);
+
         public static Material Create(SharedResource<Shader> shader, SharedResource<Texture2D> mainTexture = null,
             SharedResource<Texture2D> normalTexture = null, bool useLinearFiltering = false, float normalScale = 1)
             => Create(shader, Color.White, mainTexture, normalTexture, useLinearFiltering, normalScale);
@@ -91,15 +159,19 @@ namespace Atlas2D.Rendering
                 mainColor, useLinearFiltering, normalScale);
         }
 
-        public static Material Create(Material materialToCopy)
-        {
-            return new Material(materialToCopy.Shader, materialToCopy.MainTexture, materialToCopy.NormalTexture,
-                materialToCopy.MainColor, materialToCopy.UsingLinearFiltering, materialToCopy.NormalScale);
-        }
+        public static Material CreateArray(SharedResource<Texture2DArray> mainTextureArray, SharedResource<Texture2DArray> normalTextureArray = null,
+            bool useLinearFiltering = false, float normalScale = 1)
+            => CreateArray(GlobalShaders.TextureArray, Color.White, mainTextureArray, normalTextureArray, useLinearFiltering, normalScale);
 
-        public static Material Create(Color color)
+        public static Material CreateArray(SharedResource<Shader> shader, SharedResource<Texture2DArray> mainTextureArray,
+            SharedResource<Texture2DArray> normalTextureArray = null, bool useLinearFiltering = false, float normalScale = 1)
+            => CreateArray(shader, Color.White, mainTextureArray, normalTextureArray, useLinearFiltering, normalScale);
+
+        public static Material CreateArray(SharedResource<Shader> shader, Color mainColor, SharedResource<Texture2DArray> mainTextureArray,
+            SharedResource<Texture2DArray> normalTextureArray = null, bool useLinearFiltering = false, float normalScale = 1)
         {
-            return Create(GlobalShaders.Texture, color);
+            return new Material(shader, mainTextureArray, normalTextureArray,
+                mainColor, useLinearFiltering, normalScale);
         }
 
         public static Material CreateCircle(SharedResource<Shader> shader, Color color)
@@ -131,19 +203,58 @@ namespace Atlas2D.Rendering
         {
             return Create(GlobalShaders.Lit, Color.White, mainTexture, normalTexture, useLinearFiltering, normalScale);
         }
+
+        public static Material CreateLitArray(Color mainColor, SharedResource<Texture2DArray> mainTextureArray,
+            SharedResource<Texture2DArray> normalTextureArray = null, bool useLinearFiltering = false, float normalScale = 1)
+        {
+            return CreateArray(GlobalShaders.LitArray, mainColor, mainTextureArray, normalTextureArray, useLinearFiltering, normalScale);
+        }
+
+        public static Material CreateLitArray(SharedResource<Texture2DArray> mainTextureArray,
+            SharedResource<Texture2DArray> normalTextureArray = null, bool useLinearFiltering = false, float normalScale = 1)
+        {
+            return CreateArray(GlobalShaders.LitArray, Color.White, mainTextureArray, normalTextureArray, useLinearFiltering, normalScale);
+        }
+
+        public static Material Copy(Material material)
+        {
+            if (material.UseTextureArrays)
+            {
+                return new Material(material.Shader, material.MainTextureArray, material.NormalTextureArray,
+                    material.MainColor, material.UseLinearFiltering, material.NormalScale);
+            }
+            else
+            {
+                return new Material(material.Shader, material.MainTexture, material.NormalTexture,
+                    material.MainColor, material.UseLinearFiltering, material.NormalScale);
+            }
+        }
         #endregion
 
         public void Use()
         {
-            MainTexture.Value.SetFilteringMode(UsingLinearFiltering);
-            NormalTexture.Value.SetFilteringMode(UsingLinearFiltering);
-            MainTexture.Value.Use(GL_TEXTURE0);
-            NormalTexture.Value.Use(GL_TEXTURE1);
+            if(UseTextureArrays)
+            {
+                MainTextureArray.Value.SetFilteringMode(UseLinearFiltering);
+                MainTextureArray.Value.Use(GL_TEXTURE0);
+                if (NormalTextureArray != null)
+                {
+                    NormalTextureArray.Value.SetFilteringMode(UseLinearFiltering);
+                    NormalTextureArray.Value.Use(GL_TEXTURE1);
+                }
+            }
+            else
+            {
+                MainTexture.Value.SetFilteringMode(UseLinearFiltering);
+                NormalTexture.Value.SetFilteringMode(UseLinearFiltering);
+                MainTexture.Value.Use(GL_TEXTURE0);
+                NormalTexture.Value.Use(GL_TEXTURE1);
+            }
 
             Shader.Value.Use();
             Shader.Value.SetInt("mainTextureSampler", 0);
             Shader.Value.SetInt("normalTextureSampler", 1);
-            Shader.Value.SetFloat("totalLayers", 0);
+            Shader.Value.SetInt("hasNormalTexture", UseTextureArrays && NormalTextureArray == null ? 0 : 1);
             Shader.Value.SetColor("mainColor", MainColor);
             Shader.Value.SetFloat("normalScale", NormalScale);
         }

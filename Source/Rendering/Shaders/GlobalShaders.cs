@@ -9,6 +9,7 @@
         public static SharedResource<Shader> Vertex { get; private set; }
         public static SharedResource<Shader> Text { get; private set; }
         public static SharedResource<Shader> Lit { get; private set; }
+        public static SharedResource<Shader> LitArray { get; private set; }
         public static SharedResource<Shader> StencilOnly { get; private set; }
 
         internal static void Initialize()
@@ -20,6 +21,7 @@
             Vertex = SharedResource<Shader>.Create(new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/Vertex.glsl")), true));
             Text = SharedResource<Shader>.Create(new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/Text.glsl")), true));
             Lit = SharedResource<Shader>.Create(new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/Lit.glsl")), true, new string[] { "lights" }));
+            LitArray = SharedResource<Shader>.Create(new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/LitArray.glsl")), true, new string[] { "lights" }));
             StencilOnly = SharedResource<Shader>.Create(new Shader(Shader.ParseShader(Resources.GetEngineResourcePath("Shaders/StencilOnly.glsl")), true));
         }
 
@@ -32,6 +34,7 @@
             Vertex.Release();
             Text.Release();
             Lit.Release();
+            LitArray.Release();
             StencilOnly.Release();
         }
     }
