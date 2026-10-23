@@ -36,6 +36,10 @@ namespace Atlas2D.Audio
         private float _smoothedSpatialPanningAdditive = 0f;
 
         private volatile bool _streamEnded;
+        private bool _disposed;
+
+        // The input this stream has in the mixer, or null when it isn't in the mixer
+        internal ISampleProvider MixerInput;
 
         public AudioStream(string fileName)
         {
@@ -43,7 +47,13 @@ namespace Atlas2D.Audio
             _sourceStream = new AudioFileReader(fileName);
             EnableLooping = true;
 
-            _volumeSampleProvider = new VolumeSampleProvider(this.ToSampleProvider());
+            // Panning needs stereo, so mono files get turned into stereo
+            ISampleProvider source = this.ToSampleProvider();
+            if (source.WaveFormat.Channels == 1)
+            {
+                source = new MonoToStereoSampleProvider(source);
+            }
+            _volumeSampleProvider = new VolumeSampleProvider(source);
             _panningSampleProvider = new StereoPanningSampleProvider(_volumeSampleProvider);
 
             VolumeFadeSampleProvider = new AudioVolumeFadeSampleProvider(_panningSampleProvider);
@@ -89,6 +99,21 @@ namespace Atlas2D.Audio
         }
 
         internal void FireStreamEnd() => OnStreamEnd?.Invoke();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                _disposed = true;
+                if (disposing)
+                {
+                    // Out of the mixer first, so the audio thread stops reading the file
+                    AudioSystem.RemoveStream(this);
+                    _sourceStream.Dispose();
+                }
+            }
+            base.Dispose(disposing);
+        }
 
         public override int Read(byte[] buffer, int offset, int count)
         {

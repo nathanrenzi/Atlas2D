@@ -160,6 +160,7 @@ namespace Atlas2D.Audio
 
         public void Dispose()
         {
+            PlaybackState = PlaybackState.Stopped;
             Stream?.Dispose();
         }
     }

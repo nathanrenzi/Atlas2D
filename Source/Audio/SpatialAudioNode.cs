@@ -24,10 +24,12 @@ namespace Atlas2D.Audio
         protected override void OnDisable() => AudioInstance.Pause();
 
         protected override void OnUpdate()
-        { 
+        {
+            if (CameraNode.Main == null) return;
             Vector2 listenerPos = CameraNode.Main.WorldPosition;
             float rawDistance = Vector2.Distance(listenerPos, WorldPosition);
-            float normalizedDistance = MathEx.Clamp01((rawDistance - MinRange) / (MaxRange - MinRange));
+            float range = MathF.Max(MaxRange - MinRange, 0.001f);
+            float normalizedDistance = MathEx.Clamp01((rawDistance - MinRange) / range);
             float volumeMultiplier = FalloffCurve.Evaluate(normalizedDistance * MathEx.Clamp(VolumeSpatializationMultiplier, 0, 1));
             float visibleHalfWidth = (Display.REFERENCE_WINDOW_WIDTH * 0.5f) / CameraNode.Main.Zoom;
             float panning = ((WorldPosition.X - listenerPos.X) / visibleHalfWidth) * MathEx.Clamp(PanningSpatializationMultiplier, 0, 10);
