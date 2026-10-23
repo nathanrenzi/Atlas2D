@@ -384,13 +384,7 @@ namespace Atlas2D
         /// <returns></returns>
         public static Vector2 GetMouseWorldPosition()
         {
-            Vector2 centered = new Vector2(
-                MousePosition.X - Display.WindowSize.X * 0.5f,
-                (Display.WindowSize.Y * 0.5f) - MousePosition.Y
-            );
-            centered /= CameraNode.Main.Zoom;
-
-            return centered + CameraNode.Main.WorldPosition;
+            return CameraNode.Main.ScreenToWorld(MousePosition);
         }
     }
 }

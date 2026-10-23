@@ -18,6 +18,7 @@ namespace Atlas2D
 
         // Misc --------------
         public static UICanvasSettings UICanvasSettings { get; private set; } = new UICanvasSettings();
+        public static CameraSettings CameraSettings { get; private set; } = new CameraSettings();
         public static bool GraphicsErrorCheckingEnabled { get; private set; } = false;
         public static bool ShowEngineSplashscreen { get; private set; } = true;
         public static bool UseHDRFrameBuffers { get; private set; } = false;
@@ -48,6 +49,7 @@ namespace Atlas2D
 
             // Misc
             if (overrides.UICanvasSettings != null) UICanvasSettings = overrides.UICanvasSettings;
+            if (overrides.CameraSettings != null) CameraSettings = overrides.CameraSettings;
             if (overrides.GraphicsErrorCheckingEnabled.HasValue) GraphicsErrorCheckingEnabled = overrides.GraphicsErrorCheckingEnabled.Value;
             if (overrides.ShowEngineSplashscreen.HasValue) ShowEngineSplashscreen = overrides.ShowEngineSplashscreen.Value;
             if (overrides.UseHDRFrameBuffers.HasValue) UseHDRFrameBuffers = overrides.UseHDRFrameBuffers.Value;
@@ -72,6 +74,7 @@ namespace Atlas2D
 
         // Misc --------------
         public UICanvasSettings? UICanvasSettings { get; set; }
+        public CameraSettings? CameraSettings { get; set; }
         public bool? GraphicsErrorCheckingEnabled { get; set; }
         public bool? ShowEngineSplashscreen { get; set; }
         public bool? UseHDRFrameBuffers { get; set; }

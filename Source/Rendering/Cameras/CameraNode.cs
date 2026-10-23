@@ -12,6 +12,11 @@ namespace Atlas2D
         public bool IsMain { get; private set; }
         public float Zoom;
 
+        /// <summary>
+        /// How many screen pixels one world unit covers, combining <see cref="Zoom"/> with <see cref="ProjectSettings.CameraSettings"/>.
+        /// </summary>
+        public float PixelsPerUnit => Zoom * GetWindowScale();
+
         public CameraNode(float zoom = 1)
         {
             Zoom = zoom;
@@ -44,9 +49,28 @@ namespace Atlas2D
         {
             Matrix4x4 translation = Matrix4x4.CreateTranslation(-WorldPosition.X, -WorldPosition.Y, 0);
             Matrix4x4 rotation = Matrix4x4.CreateRotationZ(-WorldRotation * MathF.PI / 180f);
-            Matrix4x4 zoom = Matrix4x4.CreateScale(Zoom, Zoom, 1f);
+            Matrix4x4 zoom = Matrix4x4.CreateScale(PixelsPerUnit, PixelsPerUnit, 1f);
 
             return translation * rotation * zoom;
+        }
+
+        /// <summary>
+        /// Converts a position from screen pixels, measured from the top left of the window, to world space. Ignores camera rotation.
+        /// </summary>
+        public Vector2 ScreenToWorld(Vector2 screenPosition)
+        {
+            Vector2 centered = new Vector2(
+                screenPosition.X - Display.WindowSize.X * 0.5f,
+                (Display.WindowSize.Y * 0.5f) - screenPosition.Y
+            );
+            return centered / PixelsPerUnit + WorldPosition;
+        }
+
+        private static float GetWindowScale()
+        {
+            CameraSettings settings = ProjectSettings.CameraSettings;
+            if (settings.ScalingMode == CameraScalingMode.ExpandWithWindow) return 1f;
+            return MathF.Min(Display.WindowSize.X / settings.ViewSize.X, Display.WindowSize.Y / settings.ViewSize.Y);
         }
 
         /// <summary>

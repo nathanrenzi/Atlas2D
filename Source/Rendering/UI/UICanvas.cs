@@ -271,13 +271,7 @@ namespace Atlas2D.UI
         /// <returns>The position in world space.</returns>
         public Vector2 ScreenToWorld(Vector2 position)
         {
-            Vector2 centered = new Vector2(
-                position.X - Display.WindowSize.X * 0.5f,
-                (Display.WindowSize.Y * 0.5f) - position.Y
-            );
-            centered /= CameraNode.Main.Zoom;
-
-            return centered + CameraNode.Main.WorldPosition;
+            return CameraNode.Main.ScreenToWorld(position);
         }
 
         internal void UpdateLayout()

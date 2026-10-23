@@ -56,7 +56,7 @@ namespace Atlas2D.Audio
             float range = MathF.Max(MaxRange - MinRange, 0.001f);
             float normalizedDistance = MathEx.Clamp01((rawDistance - MinRange) / range);
             float volumeMultiplier = FalloffCurve.Evaluate(normalizedDistance * MathEx.Clamp(VolumeSpatializationMultiplier, 0, 1));
-            float visibleHalfWidth = (Display.REFERENCE_WINDOW_WIDTH * 0.5f) / CameraNode.Main.Zoom;
+            float visibleHalfWidth = Display.WindowSize.X * 0.5f / CameraNode.Main.PixelsPerUnit;
             float panning = ((WorldPosition.X - listenerPos.X) / visibleHalfWidth) * MathEx.Clamp(PanningSpatializationMultiplier, 0, 10);
             AudioInstance.Stream?.SetSpatializationValues(volumeMultiplier, panning);
         }
