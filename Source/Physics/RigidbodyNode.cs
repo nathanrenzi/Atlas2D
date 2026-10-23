@@ -10,6 +10,7 @@ namespace Atlas2D.PhysicsBox2D
     {
         public static readonly float Epsilon = 1f;
         public static List<RigidbodyNode> Rigidbodies = new List<RigidbodyNode>();
+        private static readonly Dictionary<uint, RigidbodyNode> _rigidbodiesByID = new Dictionary<uint, RigidbodyNode>();
 
         public Action<RigidbodyNode> OnBeginContact { get; set; }
         public Action<RigidbodyNode> OnEndContact { get; set; }
@@ -61,6 +62,10 @@ namespace Atlas2D.PhysicsBox2D
         }
         public RigidbodyMode Mode { get; private set; }
         public RigidbodyShape Shape { get; private set; }
+        /// <summary>
+        /// The size of the collider in pixels. For circles, X is the diameter.
+        /// </summary>
+        public Vector2 Size { get; private set; }
         public bool IsStatic { get; private set; }
 
         // https://www.iforce2d.net/b2dtut/collision-filtering
@@ -80,7 +85,7 @@ namespace Atlas2D.PhysicsBox2D
         /// </summary>
         public short GroupIndex { get; private set; }
         /// <summary>
-        /// Vertex array for a custom convex collider. Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
+        /// Vertex array for a custom convex collider, in pixels around the body's center (3 to 8 points). Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
         /// </summary>
         public Vector2[] ConvexColliderPoints { get; private set; }
 
@@ -108,22 +113,28 @@ namespace Atlas2D.PhysicsBox2D
 
         public static RigidbodyNode CreateDynamic(RigidbodyDynamicDef def)
         {
-            return new RigidbodyNode(false, def.Velocity, def.AngularVelocity, def.MassData, def.Friction, def.Bounciness,
-                def.Density, def.LinearDampening, def.AngularDampening, def.FixedRotation, def.Shape,
-                RigidbodyMode.Dynamic, def.Layer, def.HitMask, def.GroupIndex, def.ConvexColliderPoints);
+            return new RigidbodyNode(false, def.Position, def.Rotation, def.Size, def.Velocity, def.AngularVelocity, def.MassData,
+                def.Friction, def.Bounciness, def.Density, def.LinearDampening, def.AngularDampening, def.FixedRotation, def.IsBullet,
+                def.Shape, RigidbodyMode.Dynamic, def.Layer, def.HitMask, def.GroupIndex, def.ConvexColliderPoints);
         }
 
         public static RigidbodyNode CreateKinematic(RigidbodyKinematicDef def)
         {
-            return new RigidbodyNode(true, new Vector2(0, 0), 0, new MassData(), def.Friction, def.Bounciness, 1, 0.0f, 0.0f, false, def.Shape,
-                RigidbodyMode.Kinematic, def.Layer, def.HitMask, def.GroupIndex, def.ConvexColliderPoints);
+            return new RigidbodyNode(true, def.Position, def.Rotation, def.Size, new Vector2(0, 0), 0, new MassData(),
+                def.Friction, def.Bounciness, 1, 0.0f, 0.0f, false, false,
+                def.Shape, RigidbodyMode.Kinematic, def.Layer, def.HitMask, def.GroupIndex, def.ConvexColliderPoints);
         }
 
-        private RigidbodyNode(bool isStatic, Vector2 startVelocity, float startAngularVelocity,
-            MassData massData, float friction, float bounciness, float density, float linearDampening,
-            float angularDampening, bool fixedRotation, RigidbodyShape rigidbodyShape, RigidbodyMode rigidbodyMode,
-            ushort layer, ushort hitMask, short groupIndex, Vector2[] convexColliderPoints)
+        private RigidbodyNode(bool isStatic, Vector2 position, float rotation, Vector2 size, Vector2 startVelocity,
+            float startAngularVelocity, MassData massData, float friction, float bounciness, float density,
+            float linearDampening, float angularDampening, bool fixedRotation, bool isBullet, RigidbodyShape rigidbodyShape,
+            RigidbodyMode rigidbodyMode, ushort layer, ushort hitMask, short groupIndex, Vector2[] convexColliderPoints)
         {
+            // Set first, because the Box2D body is built from them below
+            LocalPosition = position;
+            LocalRotation = rotation;
+            Size = size;
+
             IsStatic = isStatic;
             _velocity = startVelocity;
             _angularVelocity = startAngularVelocity;
@@ -146,12 +157,13 @@ namespace Atlas2D.PhysicsBox2D
             BodyDef bodyDef = new BodyDef()
             {
                 position = LocalPosition / Physics.WorldScalar,
-                angle = LocalRotation,
+                angle = LocalRotation * MathF.PI / 180f,
                 linearVelocity = _velocity,
                 angularVelocity = _angularVelocity,
                 linearDamping = _linearDampening,
                 angularDamping = _angularDampening,
-                fixedRotation = _fixedRotation
+                fixedRotation = _fixedRotation,
+                bullet = isBullet
             };
 
             FixtureDef fixtureDef = new FixtureDef()
@@ -166,64 +178,103 @@ namespace Atlas2D.PhysicsBox2D
                     groupIndex = GroupIndex
                 }
             };
+            // The collider is made slightly smaller than Size (by Epsilon pixels), and never smaller than 1 pixel
+            Vector2 halfSize = Vector2.Max((Size - new Vector2(Epsilon)) / 2f, new Vector2(0.5f)) / Physics.WorldScalar;
             switch (Shape)
             {
                 case RigidbodyShape.Box:
-                    fixtureDef.shape = new PolygonShape((LocalScale.X - Epsilon) / 2f / Physics.WorldScalar, (LocalScale.Y - Epsilon) / 2f / Physics.WorldScalar);
+                    fixtureDef.shape = new PolygonShape(halfSize.X, halfSize.Y);
                     break;
                 case RigidbodyShape.Circle:
                     fixtureDef.shape = new CircleShape()
                     {
-                        Radius = (LocalScale.X - Epsilon) / 2f / Physics.WorldScalar
+                        Radius = halfSize.X
                     };
                     break;
                 case RigidbodyShape.ConvexMesh:
-                    fixtureDef.shape = new PolygonShape();
+                    if (ConvexColliderPoints == null || ConvexColliderPoints.Length < 3 || ConvexColliderPoints.Length > 8)
+                    {
+                        Debug.LogError("PHYSICS: A convex mesh collider needs 3 to 8 points. Using a box instead.");
+                        fixtureDef.shape = new PolygonShape(halfSize.X, halfSize.Y);
+                    }
+                    else
+                    {
+                        Vector2[] points = new Vector2[ConvexColliderPoints.Length];
+                        for (int i = 0; i < points.Length; i++)
+                        {
+                            points[i] = ConvexColliderPoints[i] / Physics.WorldScalar;
+                        }
+                        fixtureDef.shape = new PolygonShape(points);
+                    }
                     break;
             }
 
             ID = Physics.CreatePhysicsBody(bodyDef, fixtureDef, _massData, Mode == RigidbodyMode.Kinematic);
-            _isValid = true;
+            _isValid = ID != uint.MaxValue;
+            if (_isValid) _rigidbodiesByID[ID] = this;
         }
 
         protected override void OnDispose()
         {
             if (IsDestroyed) return;
-            Rigidbodies.Remove(this);
-            if (ID != uint.MaxValue) Physics.RemovePhysicsBody(ID);
             IsDestroyed = true;
+
+            // Joints are removed first, so the other body's joint list stays correct
+            foreach (uint jointID in Joints.Keys.ToArray())
+            {
+                RemoveJoint(jointID);
+            }
+
+            // End any current contacts now. Box2D's own end events for this body arrive after it's gone, and get ignored.
+            foreach (RigidbodyNode other in CurrentContacts.ToArray())
+            {
+                if (other.CurrentContacts.Remove(this))
+                {
+                    other.OnEndContact?.Invoke(this);
+                }
+            }
+            CurrentContacts.Clear();
+            foreach (RigidbodySensorNode sensor in RigidbodySensorNode.Sensors.ToArray())
+            {
+                sensor.RemoveContact(this);
+            }
+
+            Rigidbodies.Remove(this);
+            if (ID != uint.MaxValue)
+            {
+                _rigidbodiesByID.Remove(ID);
+                Physics.RemovePhysicsBody(ID);
+            }
+        }
+
+        /// <summary>
+        /// Returns the rigidbody with the given physics ID, or null.
+        /// </summary>
+        public static RigidbodyNode GetByID(uint _id)
+        {
+            return _rigidbodiesByID.TryGetValue(_id, out RigidbodyNode rigidbody) ? rigidbody : null;
         }
 
         public static void InvokeCollision(uint _id, uint _hitId, bool _beginContact)
         {
-            RigidbodyNode body1 = null;
-            RigidbodyNode body2 = null;
-            for (int i = 0; i < Rigidbodies.Count; i++)
-            {
-                if (Rigidbodies[i].ID == _id)
-                {
-                    body1 = Rigidbodies[i];
-                }
-
-                if (Rigidbodies[i].ID == _hitId)
-                {
-                    body2 = Rigidbodies[i];
-                }
-            }
+            RigidbodyNode body1 = GetByID(_id);
+            RigidbodyNode body2 = GetByID(_hitId);
             if (body1 == null) return;
             if (body2 == null) return;
 
             if (_beginContact)
             {
                 // Begin Contact
-                body1.OnBeginContact?.Invoke(body2);
                 body1.CurrentContacts.Add(body2);
+                body1.OnBeginContact?.Invoke(body2);
             }
             else
             {
                 // End Contact
-                body1.OnEndContact?.Invoke(body1);
-                body1.CurrentContacts.Remove(body1);
+                if (body1.CurrentContacts.Remove(body2))
+                {
+                    body1.OnEndContact?.Invoke(body2);
+                }
             }
         }
 
@@ -263,6 +314,7 @@ namespace Atlas2D.PhysicsBox2D
             if(_jointDef.RigidbodyA == null || _jointDef.RigidbodyB == null)
             {
                 Debug.LogError("PHYSICS: Cannot create a joint when one or more rigidbodies are null.");
+                return uint.MaxValue;
             }
 
             uint id;
@@ -317,6 +369,18 @@ namespace Atlas2D.PhysicsBox2D
     public struct RigidbodyKinematicDef
     {
         /// <summary>
+        /// The starting position of the rigidbody, in pixels.
+        /// </summary>
+        public Vector2 Position = Vector2.Zero;
+        /// <summary>
+        /// The starting rotation of the rigidbody, in degrees.
+        /// </summary>
+        public float Rotation = 0;
+        /// <summary>
+        /// The size of the collider in pixels. For circles, X is the diameter.
+        /// </summary>
+        public Vector2 Size = new Vector2(32, 32);
+        /// <summary>
         /// The friction of the rigidbody against other rigidbodies.
         /// </summary>
         public float Friction = 1;
@@ -344,7 +408,7 @@ namespace Atlas2D.PhysicsBox2D
         /// </summary>
         public short GroupIndex = 0;
         /// <summary>
-        /// Vertex array for a custom convex collider. Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
+        /// Vertex array for a custom convex collider, in pixels around the body's center (3 to 8 points). Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
         /// </summary>
         public Vector2[] ConvexColliderPoints = new Vector2[0];
 
@@ -356,6 +420,18 @@ namespace Atlas2D.PhysicsBox2D
     /// </summary>
     public struct RigidbodyDynamicDef
     {
+        /// <summary>
+        /// The starting position of the rigidbody, in pixels.
+        /// </summary>
+        public Vector2 Position = Vector2.Zero;
+        /// <summary>
+        /// The starting rotation of the rigidbody, in degrees.
+        /// </summary>
+        public float Rotation = 0;
+        /// <summary>
+        /// The size of the collider in pixels. For circles, X is the diameter.
+        /// </summary>
+        public Vector2 Size = new Vector2(32, 32);
         /// <summary>
         /// The starting linear velocity of the rigidbody.
         /// </summary>
@@ -385,7 +461,7 @@ namespace Atlas2D.PhysicsBox2D
         /// </summary>
         public float Density = 1;
         /// <summary>
-        /// The mass data of the rigidbody.
+        /// The mass data of the rigidbody. Leave the mass at 0 to calculate it from the density and shape.
         /// </summary>
         public MassData MassData = new MassData();
         /// <summary>
@@ -418,7 +494,7 @@ namespace Atlas2D.PhysicsBox2D
         /// </summary>
         public short GroupIndex = 0;
         /// <summary>
-        /// Vertex array for a custom convex collider. Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
+        /// Vertex array for a custom convex collider, in pixels around the body's center (3 to 8 points). Only used when <see cref="Shape"/> is set to <see cref="RigidbodyShape.ConvexMesh"/>
         /// </summary>
         public Vector2[] ConvexColliderPoints = new Vector2[0];
 

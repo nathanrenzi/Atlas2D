@@ -276,6 +276,8 @@ namespace Atlas2D
 
                 // Physics
                 double phyST = Glfw.Time;
+                // Collision callbacks run here before FixedUpdate
+                Physics.DispatchContactEvents();
                 // One FixedUpdate per physics step since the last frame
                 int fixedUpdates = Math.Min(Interlocked.Exchange(ref _pendingFixedUpdates, 0), MAX_FIXED_UPDATES_PER_FRAME);
                 Time.FixedDeltaTime = ProjectSettings.PhysicsTimestep;

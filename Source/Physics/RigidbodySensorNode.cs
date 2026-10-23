@@ -9,6 +9,7 @@ namespace Atlas2D.PhysicsBox2D
     {
         public static readonly float Epsilon = 1f;
         public static List<RigidbodySensorNode> Sensors = new List<RigidbodySensorNode>();
+        private static readonly Dictionary<uint, RigidbodySensorNode> _sensorsByID = new Dictionary<uint, RigidbodySensorNode>();
 
         public Action<RigidbodyNode> OnBeginContact { get; set; }
         public Action<RigidbodyNode> OnEndContact { get; set; }
@@ -53,8 +54,8 @@ namespace Atlas2D.PhysicsBox2D
             Vector2 pos = WorldPosition + (Up * Offset.Y) + (Right * Offset.X);
             BodyDef bodyDef = new BodyDef()
             {
-                position = pos,
-                angle = WorldRotation,
+                position = pos / Physics.WorldScalar,
+                angle = WorldRotation * MathF.PI / 180f,
             };
 
             FixtureDef fixtureDef = new FixtureDef()
@@ -70,8 +71,8 @@ namespace Atlas2D.PhysicsBox2D
             switch (Shape)
             {
                 case RigidbodySensorShape.Box:
-                    fixtureDef.shape = new PolygonShape((WorldScale.X - Epsilon) / 2f / Physics.WorldScalar,
-                        (WorldScale.Y - Epsilon) / 2f / Physics.WorldScalar);
+                    fixtureDef.shape = new PolygonShape((Size.X - Epsilon) / 2f / Physics.WorldScalar,
+                        (Size.Y - Epsilon) / 2f / Physics.WorldScalar);
                     break;
                 case RigidbodySensorShape.Circle:
                     fixtureDef.shape = new CircleShape()
@@ -82,49 +83,49 @@ namespace Atlas2D.PhysicsBox2D
             }
 
             ID = Physics.CreatePhysicsBody(bodyDef, fixtureDef, new MassData(), true);
-            _isValid = true;
+            _isValid = ID != uint.MaxValue;
+            if (_isValid) _sensorsByID[ID] = this;
         }
 
         protected override void OnDispose()
         {
             Sensors.Remove(this);
-            if (ID != uint.MaxValue) Physics.RemovePhysicsBody(ID);
+            CurrentContacts.Clear();
+            if (ID != uint.MaxValue)
+            {
+                _sensorsByID.Remove(ID);
+                Physics.RemovePhysicsBody(ID);
+            }
+        }
+
+        /// <summary>
+        /// Ends the contact with a rigidbody, if there is one. Used when the rigidbody is disposed.
+        /// </summary>
+        internal void RemoveContact(RigidbodyNode rigidbody)
+        {
+            if (CurrentContacts.Remove(rigidbody))
+            {
+                OnEndContact?.Invoke(rigidbody);
+            }
         }
 
         public static void InvokeCollision(uint _id, uint _hitId, bool _beginContact)
         {
-            RigidbodyNode hitBody = null;
-            List<RigidbodyNode> rigidbodies = RigidbodyNode.Rigidbodies;
-            for (int i = 0; i < rigidbodies.Count; i++)
-            {
-                if (rigidbodies[i].ID == _hitId)
-                {
-                    hitBody = rigidbodies[i];
-                }
-            }
+            RigidbodyNode hitBody = RigidbodyNode.GetByID(_hitId);
             if (hitBody == null) return;
 
-            RigidbodySensorNode sensor = null;
-            for (int i = 0; i < Sensors.Count; i++)
-            {
-                if (Sensors[i].ID == _id)
-                {
-                    sensor = Sensors[i];
-                }
-            }
-            if (sensor == null) return;
+            if (!_sensorsByID.TryGetValue(_id, out RigidbodySensorNode sensor)) return;
 
             if(_beginContact)
             {
                 // Begin Contact
-                sensor.OnBeginContact?.Invoke(hitBody);
                 sensor.CurrentContacts.Add(hitBody);
+                sensor.OnBeginContact?.Invoke(hitBody);
             }
             else
             {
                 // End Contact
-                sensor.OnEndContact?.Invoke(hitBody);
-                sensor.CurrentContacts.Remove(hitBody);
+                sensor.RemoveContact(hitBody);
             }
         }
 

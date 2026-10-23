@@ -53,6 +53,15 @@ namespace Atlas2D.PhysicsBox2D
             public JointDef JointDef;
         }
 
+        private struct ContactEvent
+        {
+            public uint IDA;
+            public uint IDB;
+            public bool SensorA;
+            public bool SensorB;
+            public bool Begin;
+        }
+
         private struct BodyState
         {
             public Vector2 Position;
@@ -71,6 +80,7 @@ namespace Atlas2D.PhysicsBox2D
         public static object WorldLock { get; } = new object();
 
         private static readonly ConcurrentQueue<PhysicsCommand> _commands = new();
+        private static readonly ConcurrentQueue<ContactEvent> _contactEvents = new();
         private static readonly Dictionary<uint, Body> _bodies = new();
         private static readonly Dictionary<uint, Joint> _joints = new();
         private static uint _nextBodyID = 0;
@@ -312,8 +322,9 @@ namespace Atlas2D.PhysicsBox2D
                 Body b = world.CreateBody(_bodyDefinition);
                 b.SetUserData(_id);
                 b.CreateFixture(_fixtureDef);
-                b.SetMassData(_massData);
                 b.SetType(_isKinematic ? BodyType.Kinematic : BodyType.Dynamic);
+                // SetType recalculates the mass from the fixtures, so custom mass data is set after it
+                if (_massData.mass > 0) b.SetMassData(_massData);
                 _bodies.Add(_id, b);
 
                 lock (_stateLock)
@@ -548,133 +559,78 @@ namespace Atlas2D.PhysicsBox2D
 
         private static uint GetIDFromBody(Body _body)
         {
-            return _body.GetUserData<uint>();
+            return _body.UserData is uint id ? id : uint.MaxValue;
         }
 
+        /// <summary>
+        /// Sends the collision events from the last physics steps to the rigidbodies and sensors. Called on the main thread.
+        /// </summary>
+        internal static void DispatchContactEvents()
+        {
+            while (_contactEvents.TryDequeue(out ContactEvent contactEvent))
+            {
+                if (contactEvent.SensorA)
+                {
+                    RigidbodySensorNode.InvokeCollision(contactEvent.IDA, contactEvent.IDB, contactEvent.Begin);
+                }
+                else if (contactEvent.SensorB)
+                {
+                    RigidbodySensorNode.InvokeCollision(contactEvent.IDB, contactEvent.IDA, contactEvent.Begin);
+                }
+                else
+                {
+                    RigidbodyNode.InvokeCollision(contactEvent.IDA, contactEvent.IDB, contactEvent.Begin);
+                    RigidbodyNode.InvokeCollision(contactEvent.IDB, contactEvent.IDA, contactEvent.Begin);
+                }
+            }
+        }
+
+        private static void QueueContactEvent(Contact contact, bool begin)
+        {
+            Fixture fixtureA = contact.FixtureA;
+            Fixture fixtureB = contact.FixtureB;
+            if (fixtureA?.Body == null || fixtureB?.Body == null) return;
+
+            _contactEvents.Enqueue(new ContactEvent()
+            {
+                IDA = GetIDFromBody(fixtureA.Body),
+                IDB = GetIDFromBody(fixtureB.Body),
+                SensorA = fixtureA.IsSensor(),
+                SensorB = fixtureB.IsSensor(),
+                Begin = begin
+            });
+        }
+
+        /// <summary>
+        /// Box2D calls these during a step on the physics thread, so the events are queued and sent on the main thread.
+        /// </summary>
         public class WorldContactListener : ContactListener
         {
-            public void BeginContact(Contact contact)
-            {
-                Fixture fixtureA = contact.FixtureA;
-                Fixture fixtureB = contact.FixtureB;
-
-                Body bodyA = fixtureA.Body;
-                Body bodyB = fixtureB.Body;
-
-                if(bodyA == null || bodyB == null)
-                {
-                    Debug.LogError("PHYSICS: Contact body is null, cannot invoke collision.");
-                    return;
-                }
-
-                uint idA = GetIDFromBody(bodyA);
-                uint idB = GetIDFromBody(bodyB);
-
-                if (fixtureA.IsSensor())
-                {
-                    RigidbodySensorNode.InvokeCollision(idA, idB, true);
-                }
-                else if (fixtureB.IsSensor())
-                {
-                    RigidbodySensorNode.InvokeCollision(idB, idA, true);
-                }
-                else
-                {
-                    // Both are rigidbodies
-                    RigidbodyNode.InvokeCollision(idA, idB, true);
-                    RigidbodyNode.InvokeCollision(idB, idA, true);
-                }
-            }
-
             public override void BeginContact(in Contact contact)
             {
-                
-            }
-
-            public void EndContact(Contact contact)
-            {
-                Fixture fixtureA = contact.FixtureA;
-                Fixture fixtureB = contact.FixtureB;
-
-                Body bodyA = fixtureA.Body;
-                Body bodyB = fixtureB.Body;
-
-                if (bodyA == null || bodyB == null)
-                {
-                    Debug.LogError("PHYSICS: Contact body is null, cannot invoke collision.");
-                    return;
-                }
-
-                uint idA = GetIDFromBody(bodyA);
-                uint idB = GetIDFromBody(bodyB);
-
-                if (fixtureA.IsSensor())
-                {
-                    RigidbodySensorNode.InvokeCollision(idA, idB, false);
-                }
-                else if (fixtureB.IsSensor())
-                {
-                    RigidbodySensorNode.InvokeCollision(idB, idA, false);
-                }
-                else
-                {
-                    // Both are rigidbodies
-                    RigidbodyNode.InvokeCollision(idA, idB, false);
-                    RigidbodyNode.InvokeCollision(idB, idA, false);
-                }
+                QueueContactEvent(contact, true);
             }
 
             public override void EndContact(in Contact contact)
             {
-                
+                QueueContactEvent(contact, false);
             }
 
-            public void PostSolve(Contact contact, ContactImpulse impulse)
-            {
-                
-            }
+            public override void PreSolve(in Contact contact, in Manifold oldManifold) { }
 
-            public override void PostSolve(in Contact contact, in ContactImpulse impulse)
-            {
-                
-            }
-
-            public void PreSolve(Contact contact, Manifold oldManifold)
-            {
-                
-            }
-
-            public override void PreSolve(in Contact contact, in Manifold oldManifold)
-            {
-                
-            }
+            public override void PostSolve(in Contact contact, in ContactImpulse impulse) { }
         }
 
         public class WorldDestructionListener : DestructionListener
         {
+            // Box2D calls this for each joint when a body is destroyed
             public override void SayGoodbye(Joint joint)
             {
-                throw new NotImplementedException();
+                if (joint.UserData is uint id) _joints.Remove(id);
             }
 
-            public override void SayGoodbye(Fixture fixture)
-            {
-                foreach (var rigidbody in RigidbodyNode.Rigidbodies)
-                {
-                    if (rigidbody.ID == fixture.Body.GetUserData<uint>())
-                    {
-                        rigidbody.Dispose();
-                    }
-                }
-
-                foreach (var sensor in RigidbodySensorNode.Sensors)
-                {
-                    if (sensor.ID == fixture.Body.GetUserData<uint>())
-                    {
-                        sensor.Dispose();
-                    }
-                }
-            }
+            // Nodes clean up their own bodies, so there's nothing to do here
+            public override void SayGoodbye(Fixture fixture) { }
         }
     }
 }
